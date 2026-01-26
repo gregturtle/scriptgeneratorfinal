@@ -33,7 +33,14 @@ Video Generation: Automatic video overlay using fluent-ffmpeg when background vi
   - **Google Gemini 2.5 Pro**: Uses Replit AI credits (no API key needed, uses Replit AI Integrations)
 - **Voice Synthesis**: Uses ElevenLabs API to convert scripts into professional voice recordings.
 - **Video Creation**: Leverages FFmpeg (fluent-ffmpeg) to combine AI voiceovers with background videos, creating complete ad assets.
-- **Google Sheets Integration**: Exports scripts and metadata to timestamped Google Sheets tabs, supporting performance data export with configurable date ranges. Additionally, all generated scripts are logged to a "ScriptDatabase" tab with fields: ScriptBatchID, ScriptID, MKJobID (0 for AI-generated), DateTimestampCreated, ScriptLanguage, ScriptCopy, ScriptAIPrompt (from AI Creative Inspiration field), and AIModel.
+- **Google Sheets Integration**: Exports scripts and metadata to timestamped Google Sheets tabs, supporting performance data export with configurable date ranges. All generated scripts are automatically recorded to a central script_database tab in a dedicated Google Sheet (ID: 1elJajodJA1zfzhdlPklw7iTiTaWD11Ij). The script_database uses the following format:
+  - Column A: script_batch_id (format: sb00001, sb00002, etc.)
+  - Column B: script_id (format: s00001, s00002, etc.)
+  - Column C: timestamp (ISO format)
+  - Column D: language_id (lowercase ISO codes: en, de, es, etc.)
+  - Column E: script_copy (the actual script text)
+  - Column F: ai_model (which LLM generated the script)
+  - Column G: status (pending/approved/rejected for Slack approval workflow)
 - **Slack Integration**: Comprehensive workflow for sending video batches for approval, including a 15-minute delay for Google Drive processing, button-based approvals, and automatic deletion of rejected videos from Google Drive.
 
 ### System Design Choices
