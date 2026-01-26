@@ -1,0 +1,42 @@
+# This file tells Replit which files to exclude from deployment
+
+# User uploaded content (CRITICAL - these are too large for deployment)
+uploads/**
+attached_assets/**
+
+# Temporary files
+/tmp/**
+temp/**
+*.tmp
+
+# Build artifacts (will be rebuilt during deployment)
+node_modules/**
+dist/**
+build/**
+
+# Development files
+.git/**
+.env
+.env.local
+*.log
+
+# Large CSV files except essentials
+server/data/*.csv
+!server/data/default_primer.csv
+!server/data/primers/**
+
+# Test files
+__tests__/**
+*.test.*
+*.spec.*
+
+# Documentation
+README.md
+*.md
+
+# IDE files
+.vscode/**
+.idea/**
+*.swp
+*.swo
+.DS_Store

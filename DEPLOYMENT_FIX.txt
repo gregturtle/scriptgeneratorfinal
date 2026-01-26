@@ -1,0 +1,28 @@
+DEPLOYMENT FIX - MUST READ
+==========================
+
+THE PROBLEM:
+The default npm build command uses --outdir which creates the server file at the wrong location.
+It needs to use --outfile=dist/index.js instead.
+
+THE SOLUTION:
+In your Replit Deployment Settings, change the commands to:
+
+Build Command: node scripts/build.js
+Run Command: node deploy-start.js
+
+OR IF THAT DOESN'T WORK:
+
+Build Command: npx vite build && npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js
+Run Command: NODE_ENV=production node dist/index.js
+
+VERIFICATION:
+After build, you should have:
+- dist/index.js (228 KB) - NOT dist/index/index.js
+- dist/public/ (with client files)
+
+WHY THIS WORKS:
+Our scripts use --outfile=dist/index.js which puts the server bundle in the correct location.
+The npm build command uses --outdir=dist which creates it in the wrong place.
+
+TESTED AND WORKING ✅

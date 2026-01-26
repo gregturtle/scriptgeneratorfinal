@@ -1,0 +1,45 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+build
+*.local
+server/public
+
+# Uploads and user content (CRITICAL FOR DEPLOYMENT)
+uploads/
+attached_assets/
+server/data/*.csv
+!server/data/default_primer.csv
+!server/data/primers/
+
+# Temporary files
+/tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+lerna-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Misc
+*.pem
+thumbs.db
+desktop.ini
+vite.config.ts.*
+*.tar.gz

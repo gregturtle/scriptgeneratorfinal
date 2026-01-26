@@ -1,0 +1,52 @@
+# Dependencies (will be rebuilt)
+node_modules
+
+# Build artifacts
+dist
+build
+*.local
+
+# User uploaded content (should use external storage)
+uploads/
+attached_assets/
+server/data/*.csv
+!server/data/default_primer.csv
+!server/data/primers/
+
+# Temporary files
+/tmp/
+temp/
+*.tmp
+
+# Development files
+.git
+.gitignore
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Documentation
+README.md
+*.md
+
+# Test files
+__tests__
+*.test.*
+*.spec.*
+
+# Misc
+*.pem
+thumbs.db
+desktop.ini
