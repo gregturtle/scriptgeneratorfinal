@@ -344,6 +344,19 @@ Respond in JSON format:
         console.log('Voice generation skipped. includeVoice:', includeVoice, 'isConfigured:', elevenLabsService.isConfigured());
       }
 
+      // Record scripts to the central script_database
+      try {
+        const scriptsToRecord = suggestions.map(s => ({
+          language: language,
+          scriptCopy: s.nativeContent || s.content,
+          aiModel: s.llmModel || llmProvider
+        }));
+        await googleSheetsService.recordScriptsToDatabase(scriptsToRecord);
+        console.log('Scripts recorded to script_database');
+      } catch (dbError) {
+        console.error('Error recording to script_database (continuing):', dbError);
+      }
+
       return {
         suggestions,
         message: 'Successfully generated script suggestions using Guidance Primer',
@@ -578,6 +591,19 @@ OUTPUT FORMAT (strict JSON):
         }
       }
 
+      // Record iterations to the central script_database
+      try {
+        const scriptsToRecord = suggestions.map(s => ({
+          language: language,
+          scriptCopy: s.nativeContent || s.content,
+          aiModel: s.llmModel || llmProvider
+        }));
+        await googleSheetsService.recordScriptsToDatabase(scriptsToRecord);
+        console.log('Iterations recorded to script_database');
+      } catch (dbError) {
+        console.error('Error recording iterations to script_database (continuing):', dbError);
+      }
+
       return {
         suggestions,
         message: `Successfully generated ${suggestions.length} script iterations`,
@@ -768,22 +794,19 @@ Output format (JSON):
         `Saved ${suggestions.length} suggestions to sheet tab "${timestampedTabName}"`,
       );
 
-      // Also write to ScriptDatabase tab (IDs are auto-generated sequentially)
+      // Also record to the central script_database
       const scriptDatabaseEntries = suggestions.map((suggestion) => {
-        // Use ISO 639-1 language code (e.g., 'en', 'hi', 'es') - capitalize first letter
         const langCode = suggestion.language || 'en';
-        const formattedCode = langCode.charAt(0).toUpperCase() + langCode.slice(1).toLowerCase();
         
         return {
-          language: formattedCode,
+          language: langCode.toLowerCase(),
           scriptCopy: suggestion.nativeContent || suggestion.content,
-          aiPrompt: guidancePrompt,
           aiModel: suggestion.llmModel || '',
         };
       });
 
-      await googleSheetsService.appendToScriptDatabase(cleanSpreadsheetId, scriptDatabaseEntries);
-      console.log(`Also saved ${suggestions.length} scripts to ScriptDatabase tab`);
+      await googleSheetsService.recordScriptsToDatabase(scriptDatabaseEntries);
+      console.log(`Also recorded ${suggestions.length} scripts to central script_database`);
 
     } catch (error) {
       console.error("Error saving suggestions to Google Sheets:", error);

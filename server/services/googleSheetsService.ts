@@ -521,146 +521,103 @@ class GoogleSheetsService {
   }
 
   /**
-   * Ensure ScriptDatabase tab exists with proper headers
+   * The central script database spreadsheet ID
+   * All generated scripts are recorded here in the script_database tab
    */
-  async ensureScriptDatabaseTab(spreadsheetId: string): Promise<void> {
-    try {
-      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
-      const tabName = "ScriptDatabase";
-      const headers = [
-        "ScriptBatchID",
-        "ScriptID",
-        "MKJobID",
-        "DateTimestampCreated",
-        "ScriptLanguage",
-        "ScriptCopy",
-        "ScriptAIPrompt",
-        "AIModel"
-      ];
-
-      // Check if tab exists
-      try {
-        await this.sheets.spreadsheets.values.get({
-          spreadsheetId: cleanSpreadsheetId,
-          range: `${tabName}!A1`,
-        });
-        console.log(`ScriptDatabase tab already exists`);
-      } catch (error: any) {
-        // Tab doesn't exist, create it
-        if (error.code === 400 || error.message?.includes('Unable to parse range')) {
-          console.log(`Creating ScriptDatabase tab with headers`);
-          await this.createTab(cleanSpreadsheetId, tabName, headers);
-        } else {
-          throw error;
-        }
-      }
-    } catch (error) {
-      console.error('Error ensuring ScriptDatabase tab:', error);
-      throw error;
-    }
-  }
+  private readonly SCRIPT_DATABASE_SPREADSHEET_ID = '1elJajodJA1zfzhdlPklw7iTiTaWD11Ij';
+  private readonly SCRIPT_DATABASE_TAB_NAME = 'script_database';
 
   /**
-   * Get the latest BatchID and ScriptID from ScriptDatabase tab
+   * Get the latest BatchID and ScriptID from script_database tab
+   * Parses IDs in format sb00001 and s00001
    */
-  async getLatestScriptDatabaseIds(spreadsheetId: string): Promise<{ lastBatchId: number; lastScriptId: number }> {
+  async getLatestScriptDatabaseIds(): Promise<{ lastBatchNum: number; lastScriptNum: number }> {
     try {
-      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
-      const tabName = "ScriptDatabase";
-
-      // Read columns A and B (BatchID and ScriptID)
       const response = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: cleanSpreadsheetId,
-        range: `${tabName}!A:B`,
+        spreadsheetId: this.SCRIPT_DATABASE_SPREADSHEET_ID,
+        range: `${this.SCRIPT_DATABASE_TAB_NAME}!A:B`,
       });
 
       const rows = response.data.values || [];
       
       if (rows.length <= 1) {
-        // Only header or empty, start from 10000
-        return { lastBatchId: 10000, lastScriptId: 10000 };
+        return { lastBatchNum: 0, lastScriptNum: 0 };
       }
 
-      // Get the last row with data
-      let lastBatchId = 10000;
-      let lastScriptId = 10000;
+      let lastBatchNum = 0;
+      let lastScriptNum = 0;
 
       for (let i = rows.length - 1; i >= 1; i--) {
         const row = rows[i];
         if (row[0] && row[1]) {
-          const batchNum = parseInt(row[0], 10);
-          const scriptNum = parseInt(row[1], 10);
-          if (!isNaN(batchNum) && batchNum > lastBatchId) {
-            lastBatchId = batchNum;
+          const batchMatch = row[0].match(/sb(\d+)/);
+          const scriptMatch = row[1].match(/s(\d+)/);
+          
+          if (batchMatch) {
+            const batchNum = parseInt(batchMatch[1], 10);
+            if (!isNaN(batchNum) && batchNum > lastBatchNum) {
+              lastBatchNum = batchNum;
+            }
           }
-          if (!isNaN(scriptNum) && scriptNum > lastScriptId) {
-            lastScriptId = scriptNum;
+          if (scriptMatch) {
+            const scriptNum = parseInt(scriptMatch[1], 10);
+            if (!isNaN(scriptNum) && scriptNum > lastScriptNum) {
+              lastScriptNum = scriptNum;
+            }
           }
         }
       }
 
-      return { lastBatchId, lastScriptId };
+      return { lastBatchNum, lastScriptNum };
     } catch (error: any) {
-      // If tab doesn't exist yet, return starting values
-      if (error.code === 400 || error.message?.includes('Unable to parse range')) {
-        return { lastBatchId: 10000, lastScriptId: 10000 };
-      }
-      console.error('Error getting latest ScriptDatabase IDs:', error);
-      return { lastBatchId: 10000, lastScriptId: 10000 };
+      console.error('Error getting latest script_database IDs:', error);
+      return { lastBatchNum: 0, lastScriptNum: 0 };
     }
   }
 
   /**
-   * Append scripts to the ScriptDatabase tab with sequential IDs
+   * Record scripts to the central script_database tab
+   * Format: script_batch_id | script_id | timestamp | language_id | script_copy | ai_model | status
    */
-  async appendToScriptDatabase(
-    spreadsheetId: string,
+  async recordScriptsToDatabase(
     scripts: Array<{
       language: string;
       scriptCopy: string;
-      aiPrompt: string;
       aiModel: string;
     }>
-  ): Promise<void> {
+  ): Promise<{ batchId: string; scriptIds: string[] }> {
     try {
-      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
-      const tabName = "ScriptDatabase";
+      const { lastBatchNum, lastScriptNum } = await this.getLatestScriptDatabaseIds();
 
-      // Ensure the tab exists
-      await this.ensureScriptDatabaseTab(cleanSpreadsheetId);
-
-      // Get the latest IDs from the sheet
-      const { lastBatchId, lastScriptId } = await this.getLatestScriptDatabaseIds(cleanSpreadsheetId);
-
-      // New batch ID is last batch + 1
-      const newBatchId = lastBatchId + 1;
-      // Script IDs start from last script + 1
-      let nextScriptId = lastScriptId + 1;
-
-      // Generate timestamp
+      const newBatchNum = lastBatchNum + 1;
+      const batchId = `sb${String(newBatchNum).padStart(5, '0')}`;
+      
+      let nextScriptNum = lastScriptNum + 1;
       const timestamp = new Date().toISOString();
+      const scriptIds: string[] = [];
 
-      // Prepare rows with sequential IDs
       const rows = scripts.map(script => {
-        const scriptId = nextScriptId;
-        nextScriptId++;
+        const scriptId = `s${String(nextScriptNum).padStart(5, '0')}`;
+        scriptIds.push(scriptId);
+        nextScriptNum++;
+        
         return [
-          newBatchId.toString(),
-          scriptId.toString(),
-          "0", // MKJobID always 0 for AI-generated
+          batchId,
+          scriptId,
           timestamp,
-          script.language,
+          script.language.toLowerCase(),
           script.scriptCopy,
-          script.aiPrompt,
-          script.aiModel
+          script.aiModel,
+          'pending'
         ];
       });
 
-      // Append to the tab
-      await this.appendDataToTab(cleanSpreadsheetId, tabName, rows);
-      console.log(`Added ${scripts.length} scripts to ScriptDatabase tab (BatchID: ${newBatchId}, ScriptIDs: ${lastScriptId + 1}-${nextScriptId - 1})`);
+      await this.appendDataToTab(this.SCRIPT_DATABASE_SPREADSHEET_ID, this.SCRIPT_DATABASE_TAB_NAME, rows);
+      console.log(`Recorded ${scripts.length} scripts to script_database (Batch: ${batchId}, Scripts: ${scriptIds[0]}-${scriptIds[scriptIds.length - 1]})`);
+      
+      return { batchId, scriptIds };
     } catch (error) {
-      console.error('Error appending to ScriptDatabase:', error);
+      console.error('Error recording scripts to database:', error);
       throw error;
     }
   }
