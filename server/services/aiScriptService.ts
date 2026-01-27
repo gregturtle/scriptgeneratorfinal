@@ -785,33 +785,11 @@ Output format (JSON):
         ];
       });
 
-      // Create the tab and add headers
-      await googleSheetsService.createTab(cleanSpreadsheetId, timestampedTabName, headers);
-
-      // Add data to the tab
-      await googleSheetsService.appendDataToTab(cleanSpreadsheetId, timestampedTabName, rows);
-
+      // Scripts are already recorded to Script_Database in generateScriptSuggestions
+      // No need to create a separate timestamped tab or duplicate the recording
       console.log(
-        `Saved ${suggestions.length} suggestions to sheet tab "${timestampedTabName}"`,
+        `Processed ${suggestions.length} suggestions (already saved to Script_Database)`,
       );
-
-      // Also record to the central script_database
-      const scriptDatabaseEntries = suggestions.map((suggestion) => {
-        const langCode = suggestion.language || 'en';
-        
-        return {
-          language: langCode.toLowerCase(),
-          scriptCopy: suggestion.nativeContent || suggestion.content,
-          aiModel: suggestion.llmModel || '',
-        };
-      });
-
-      try {
-        await googleSheetsService.recordScriptsToDatabase(spreadsheetId, scriptDatabaseEntries);
-        console.log(`Also recorded ${suggestions.length} scripts to Script_Database tab`);
-      } catch (dbError) {
-        console.error('Error recording to Script_Database (continuing):', dbError);
-      }
 
     } catch (error) {
       console.error("Error saving suggestions to Google Sheets:", error);
