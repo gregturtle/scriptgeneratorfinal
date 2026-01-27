@@ -525,7 +525,7 @@ class GoogleSheetsService {
    * All generated scripts are recorded here in the script_database tab
    */
   private readonly SCRIPT_DATABASE_SPREADSHEET_ID = '1elJajodJA1zfzhdlPklw7iTiTaWD11Ij';
-  private readonly SCRIPT_DATABASE_TAB_NAME = 'script_database';
+  private readonly SCRIPT_DATABASE_TAB_NAME = 'Script_Database';
 
   /**
    * Get the latest BatchID and ScriptID from script_database tab
