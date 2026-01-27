@@ -1506,6 +1506,26 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
     }
   });
 
+  // Read base films from Base_Database tab
+  app.get('/api/google-sheets/base-database', async (req, res) => {
+    try {
+      const { spreadsheetId } = req.query;
+
+      if (!spreadsheetId || typeof spreadsheetId !== 'string') {
+        return res.status(400).json({ error: 'Spreadsheet ID is required' });
+      }
+
+      const baseFilms = await googleSheetsService.readBaseDatabase(spreadsheetId);
+      res.json({ baseFilms });
+    } catch (error: any) {
+      console.error('Error reading Base_Database from Google Sheets:', error);
+      res.status(500).json({
+        error: 'Failed to read Base_Database from Google Sheets',
+        details: error.message
+      });
+    }
+  });
+
   // Process existing scripts into videos and send to Slack
   app.post('/api/scripts/process-to-videos', async (req, res) => {
     try {
@@ -1513,6 +1533,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         scripts, 
         voiceId, 
         language = 'en',
+        baseVideo,
         backgroundVideos: selectedBackgroundVideos = [],
         backgroundVideosDrive = [],
         sendToSlack,
@@ -1524,7 +1545,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         return res.status(400).json({ error: 'Scripts array is required' });
       }
 
-      console.log(`Processing ${scripts.length} existing scripts into videos with ${backgroundVideosDrive.length || selectedBackgroundVideos.length} background videos`);
+      const backgroundCount = baseVideo?.fileLink ? 1 : (backgroundVideosDrive.length || selectedBackgroundVideos.length);
+      console.log(`Processing ${scripts.length} existing scripts into videos with ${backgroundCount} background video${backgroundCount === 1 ? '' : 's'}`);
 
       // Transform the scripts from Google Sheets format to the format expected by our services
       const formattedScripts = scripts.map((script, index) => ({
@@ -1552,7 +1574,41 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       // Build list of background video paths - download from Drive if needed
       let videosToUse: string[] = [];
       
-      if (backgroundVideosDrive && backgroundVideosDrive.length > 0) {
+      if (baseVideo && baseVideo.fileLink) {
+        const fileId = googleDriveService.extractFileIdFromLink(baseVideo.fileLink);
+        if (!fileId) {
+          return res.status(400).json({
+            error: 'Invalid base film link',
+            details: 'Selected Base_ID has an invalid Google Drive link. Please choose another Base_ID.'
+          });
+        }
+
+        const fileInfo = await googleDriveService.getFileInfo(fileId);
+        if (!fileInfo || !fileInfo.name) {
+          return res.status(400).json({
+            error: 'Base film not found',
+            details: 'Could not find the selected Base_ID file in Google Drive. Please choose another Base_ID.'
+          });
+        }
+
+        if (fileInfo.mimeType && !fileInfo.mimeType.startsWith('video/')) {
+          return res.status(400).json({
+            error: 'Invalid base film',
+            details: 'Selected Base_ID link does not point to a video file. Please choose another Base_ID.'
+          });
+        }
+
+        console.log(`Downloading base film from Drive: ${fileInfo.name} (${fileId})`);
+        const downloadResult = await googleDriveService.downloadBaseFilmToTemp(fileId, fileInfo.name);
+        if (downloadResult.success && downloadResult.filePath) {
+          videosToUse.push(downloadResult.filePath);
+        } else {
+          return res.status(400).json({
+            error: 'Failed to download base film',
+            details: downloadResult.error || 'Failed to download base film from Google Drive. Please choose another Base_ID.'
+          });
+        }
+      } else if (backgroundVideosDrive && backgroundVideosDrive.length > 0) {
         // Download each base film from Google Drive
         for (const driveVideo of backgroundVideosDrive) {
           if (driveVideo.driveId && driveVideo.name) {

@@ -393,6 +393,37 @@ class GoogleSheetsService {
   }
 
   /**
+   * Read base film entries from the Base_Database tab
+   * Base_Id is in column A, file_link is in column G
+   */
+  async readBaseDatabase(spreadsheetId: string): Promise<{ baseId: string; fileLink: string }[]> {
+    try {
+      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
+
+      const response = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: cleanSpreadsheetId,
+        range: 'Base_Database!A:G',
+      });
+
+      const rows = response.data.values || [];
+      if (rows.length < 2) {
+        return [];
+      }
+
+      const dataRows = rows.slice(1);
+      return dataRows
+        .map((row) => ({
+          baseId: (row[0] || '').toString().trim(),
+          fileLink: (row[6] || '').toString().trim(),
+        }))
+        .filter(entry => entry.baseId && entry.fileLink);
+    } catch (error) {
+      console.error('Error reading base database from tab:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Create a new tab/sheet in an existing spreadsheet
    */
   async createTab(spreadsheetId: string, tabName: string, headers: string[]) {

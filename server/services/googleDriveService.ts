@@ -404,6 +404,35 @@ class GoogleDriveService {
   }
 
   /**
+   * Extract a Google Drive file ID from a share link or return the ID if provided directly
+   */
+  extractFileIdFromLink(input: string): string | null {
+    if (!input) return null;
+    const trimmed = input.trim();
+
+    // If the input already looks like a Drive file ID, return it
+    if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) {
+      return trimmed;
+    }
+
+    const patterns = [
+      /\/file\/d\/([a-zA-Z0-9_-]+)/,
+      /[?&]id=([a-zA-Z0-9_-]+)/,
+      /\/uc\?export=download&id=([a-zA-Z0-9_-]+)/,
+      /\/open\?id=([a-zA-Z0-9_-]+)/,
+    ];
+
+    for (const pattern of patterns) {
+      const match = trimmed.match(pattern);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Create a timestamped subfolder within a parent folder
    */
   async createTimestampedSubfolder(parentFolderId: string, timestamp?: string): Promise<string> {

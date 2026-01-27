@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import Header from "@/components/Header";
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,11 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, Zap, Calendar, ExternalLink, CheckCircle, Mic, Upload, Video, User, RefreshCw, FileText } from 'lucide-react';
+import { Loader2, Zap, Calendar, CheckCircle, Upload, Video, RefreshCw, FileText } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { useMetaAuth } from '@/hooks/useMetaAuth';
-import { Link } from 'wouter';
 import { LanguageSelector } from '@/components/LanguageSelector';
 
 interface ScriptResult {
@@ -36,25 +35,15 @@ interface ScriptResult {
 
 export default function Unified() {
   const [spreadsheetId, setSpreadsheetId] = useState('');
-  const [withAudio, setWithAudio] = useState(false);
   const [includeSubtitles, setIncludeSubtitles] = useState(false);
   const [scriptCount, setScriptCount] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<ScriptResult | null>(null);
-  const [selectedScripts, setSelectedScripts] = useState<Set<number>>(new Set());
-  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
-  const [isUploadingVideo, setIsUploadingVideo] = useState(false);
-  const [backgroundVideos, setBackgroundVideos] = useState<string[]>([]);
-  const [showDriveVideos, setShowDriveVideos] = useState(false);
-  const [driveVideos, setDriveVideos] = useState<any[]>([]);
-  const [isLoadingDrive, setIsLoadingDrive] = useState(false);
-  const [isDriveConfigured, setIsDriveConfigured] = useState(false);
-  const [availableBackgroundVideos, setAvailableBackgroundVideos] = useState<{id: string, name: string, driveId: string, size?: string}[]>([]);
-  const [selectedBackgroundVideo, setSelectedBackgroundVideo] = useState<string>(''); // Now stores driveId
-  const [loadingVideos, setLoadingVideos] = useState(false);
+  const [baseDatabaseEntries, setBaseDatabaseEntries] = useState<{ baseId: string; fileLink: string }[]>([]);
+  const [selectedBaseId, setSelectedBaseId] = useState('');
+  const [isLoadingBaseDatabase, setIsLoadingBaseDatabase] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState<string>('I8vyadnJFaMFR0zgn147'); // Default to Hybrid Voice 1
   const [availableVoices, setAvailableVoices] = useState<{voice_id: string, name: string}[]>([]);
-  const [loadingVoices, setLoadingVoices] = useState(false);
   const [guidance, setGuidance] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('en'); // Default to English
   const [primerFile, setPrimerFile] = useState<File | null>(null);
@@ -73,7 +62,6 @@ export default function Unified() {
   const [isLoadingTabs, setIsLoadingTabs] = useState(false);
   const [isLoadingScripts, setIsLoadingScripts] = useState(false);
   const [isProcessingScripts, setIsProcessingScripts] = useState(false);
-  const [selectedBackgroundVideosMulti, setSelectedBackgroundVideosMulti] = useState<string[]>([]);
   
   // States for iterations tab
   const [iterationsCount, setIterationsCount] = useState(3);
@@ -98,33 +86,9 @@ export default function Unified() {
 
   const { toast } = useToast();
 
-  // Load available background videos from Google Drive
-  useEffect(() => {
-    const loadBackgroundVideos = async () => {
-      setLoadingVideos(true);
-      try {
-        const response = await fetch('/api/video/background-videos');
-        if (response.ok) {
-          const data = await response.json();
-          setAvailableBackgroundVideos(data.videos || []);
-          setIsDriveConfigured(data.source === 'google_drive');
-          if (data.videos && data.videos.length > 0 && !selectedBackgroundVideo) {
-            setSelectedBackgroundVideo(data.videos[0].driveId);
-          }
-        }
-      } catch (error) {
-        console.error('Error loading background videos:', error);
-      } finally {
-        setLoadingVideos(false);
-      }
-    };
-    loadBackgroundVideos();
-  }, []);
-
   // Load available voices from ElevenLabs
   useEffect(() => {
     const loadVoices = async () => {
-      setLoadingVoices(true);
       try {
         const response = await fetch('/api/elevenlabs/voices');
         if (response.ok) {
@@ -146,8 +110,6 @@ export default function Unified() {
           { voice_id: 'huvDR9lwwSKC0zEjZUox', name: 'Ellara (Ellabot 2.0)' },
           { voice_id: 'flq6f7yk4E4fJM5XTYuZ', name: 'Mark (Alternative)' }
         ]);
-      } finally {
-        setLoadingVoices(false);
       }
     };
     
@@ -175,37 +137,39 @@ export default function Unified() {
     loadProviders();
   }, []);
 
-  // Load available tabs when spreadsheet ID changes and activeTab is 'process'
+  // Load available tabs and base database when spreadsheet ID changes and activeTab is 'process'
   useEffect(() => {
-    if (spreadsheetId && activeTab === 'process') {
+    if (spreadsheetId.trim() && activeTab === 'process') {
       loadAvailableTabs();
+      loadBaseDatabase();
     }
   }, [spreadsheetId, activeTab]);
 
   // Load available tabs for iterations when spreadsheet ID changes and activeTab is 'iterations'
   useEffect(() => {
-    if (iterationsSpreadsheetId && activeTab === 'iterations') {
+    if (iterationsSpreadsheetId.trim() && activeTab === 'iterations') {
       loadIterationsTabs();
     }
   }, [iterationsSpreadsheetId, activeTab]);
 
   // Load available tabs from Google Sheets
   const loadAvailableTabs = async () => {
-    if (!spreadsheetId) return;
+    if (!spreadsheetId.trim()) return;
     
     setIsLoadingTabs(true);
     try {
-      const response = await fetch(`/api/google-sheets/tabs?spreadsheetId=${encodeURIComponent(spreadsheetId)}`);
+      const response = await fetch(`/api/google-sheets/tabs?spreadsheetId=${encodeURIComponent(spreadsheetId.trim())}`);
       if (response.ok) {
         const data = await response.json();
-        setAvailableTabs(data.tabs);
+        const filteredTabs = (data.tabs || []).filter((tab: string) => tab !== 'Base_Database');
+        setAvailableTabs(filteredTabs);
         
         // Filter out stale tabs that don't exist in the new spreadsheet
-        const validSelectedTabs = selectedTabs.filter(tab => data.tabs.includes(tab));
+        const validSelectedTabs = selectedTabs.filter(tab => filteredTabs.includes(tab));
         
         // If no valid tabs remain, default to the first available tab
-        if (validSelectedTabs.length === 0 && data.tabs.length > 0) {
-          setSelectedTabs([data.tabs[0]]);
+        if (validSelectedTabs.length === 0 && filteredTabs.length > 0) {
+          setSelectedTabs([filteredTabs[0]]);
         } else {
           setSelectedTabs(validSelectedTabs);
         }
@@ -230,7 +194,7 @@ export default function Unified() {
 
   // Load scripts from selected tabs (multiple tabs)
   const loadScriptsFromTab = async () => {
-    if (!spreadsheetId || selectedTabs.length === 0) return;
+    if (!spreadsheetId.trim() || selectedTabs.length === 0) return;
     
     setIsLoadingScripts(true);
     try {
@@ -241,7 +205,7 @@ export default function Unified() {
         const response = await fetch('/api/google-sheets/read-scripts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ spreadsheetId, tabName })
+          body: JSON.stringify({ spreadsheetId: spreadsheetId.trim(), tabName })
         });
         
         if (response.ok) {
@@ -292,15 +256,28 @@ export default function Unified() {
       return;
     }
 
+    if (!selectedBaseId) {
+      toast({
+        title: "Base film required",
+        description: "Please select a Base_ID from Base_Database before processing",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const selectedBase = baseDatabaseEntries.find(entry => entry.baseId === selectedBaseId);
+    if (!selectedBase) {
+      toast({
+        title: "Base film not found",
+        description: "Selected Base_ID was not found in Base_Database. Please choose another.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setIsProcessingScripts(true);
     try {
       const scriptsToProcess = Array.from(selectedExistingScripts).map(index => existingScripts[index]);
-      
-      // Convert selected background video IDs to Drive format
-      const selectedBgVideosDrive = selectedBackgroundVideosMulti
-        .map(driveId => availableBackgroundVideos.find(v => v.driveId === driveId))
-        .filter(v => v)
-        .map(v => ({ driveId: v!.driveId, name: v!.name }));
       
       const response = await fetch('/api/scripts/process-to-videos', {
         method: 'POST',
@@ -309,7 +286,10 @@ export default function Unified() {
           scripts: scriptsToProcess,
           voiceId: selectedVoice,
           language: selectedLanguage,
-          backgroundVideosDrive: selectedBgVideosDrive,
+          baseVideo: {
+            baseId: selectedBase.baseId,
+            fileLink: selectedBase.fileLink
+          },
           sendToSlack: slackEnabled,
           slackNotificationDelay: slackEnabled ? 15 : 0, // 15 minute delay if Slack is enabled
           includeSubtitles: includeSubtitles
@@ -354,12 +334,13 @@ export default function Unified() {
     
     setIsLoadingIterationsTabs(true);
     try {
-      const response = await fetch(`/api/google-sheets/tabs?spreadsheetId=${encodeURIComponent(iterationsSpreadsheetId)}`);
+      const response = await fetch(`/api/google-sheets/tabs?spreadsheetId=${encodeURIComponent(iterationsSpreadsheetId.trim())}`);
       if (response.ok) {
         const data = await response.json();
-        setIterationsAvailableTabs(data.tabs);
-        if (data.tabs.length > 0 && !iterationsTab) {
-          setIterationsTab(data.tabs[0]);
+        const filteredTabs = (data.tabs || []).filter((tab: string) => tab !== 'Base_Database');
+        setIterationsAvailableTabs(filteredTabs);
+        if (filteredTabs.length > 0 && (!iterationsTab || !filteredTabs.includes(iterationsTab))) {
+          setIterationsTab(filteredTabs[0]);
         }
       } else {
         toast({
@@ -382,14 +363,14 @@ export default function Unified() {
 
   // Load scripts from selected tab for iterations
   const loadIterationsScriptsFromTab = async () => {
-    if (!iterationsSpreadsheetId || !iterationsTab) return;
+    if (!iterationsSpreadsheetId.trim() || !iterationsTab) return;
     
     setIsLoadingIterationsScripts(true);
     try {
       const response = await fetch('/api/google-sheets/read-scripts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ spreadsheetId: iterationsSpreadsheetId, tabName: iterationsTab })
+        body: JSON.stringify({ spreadsheetId: iterationsSpreadsheetId.trim(), tabName: iterationsTab })
       });
       
       if (response.ok) {
@@ -430,15 +411,6 @@ export default function Unified() {
       return;
     }
 
-    if (withAudio && availableBackgroundVideos.length > 0 && !selectedBackgroundVideo) {
-      toast({
-        title: "Background Video Required",
-        description: "Please select a background video for video generation",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setIsGeneratingIterations(true);
     setIterationsResult(null);
     
@@ -455,22 +427,15 @@ export default function Unified() {
         return;
       }
 
-      // Get the selected background video details for Drive download
-      const selectedBgVideo = availableBackgroundVideos.find(v => v.driveId === selectedBackgroundVideo);
-      
       const requestBody: any = {
         sourceScripts: scriptsToIterate,
         iterationsPerScript: iterationsCount,
-        generateAudio: withAudio,
-        backgroundVideoDriveId: selectedBgVideo?.driveId,
-        backgroundVideoName: selectedBgVideo?.name,
-        voiceId: selectedVoice,
+        generateAudio: false,
         language: selectedLanguage,
         experimentalPercentage: experimentalPercentage,
         individualGeneration: individualGeneration,
-        slackEnabled: slackEnabled,
-        spreadsheetId: iterationsOutputSpreadsheetId,
-        includeSubtitles: includeSubtitles,
+        slackEnabled: false,
+        spreadsheetId: iterationsOutputSpreadsheetId.trim(),
         llmProvider: llmProvider
       };
 
@@ -518,224 +483,44 @@ export default function Unified() {
     }
   };
 
-  const handleScriptSelection = (index: number, checked: boolean) => {
-    setSelectedScripts(prev => {
-      const newSet = new Set(prev);
-      if (checked) {
-        newSet.add(index);
-      } else {
-        newSet.delete(index);
-      }
-      return newSet;
-    });
-  };
-
-  const handleSelectAllScripts = (checked: boolean) => {
-    if (checked) {
-      setSelectedScripts(new Set(result?.suggestions.map((_, index) => index) || []));
-    } else {
-      setSelectedScripts(new Set());
-    }
-  };
-
-  const handleGenerateAudioForSelected = async () => {
-    if (!result || selectedScripts.size === 0) return;
-
-    setIsGeneratingAudio(true);
-    try {
-      const selectedSuggestions = Array.from(selectedScripts).map(index => 
-        result.suggestions[index]
-      );
-
-      const response = await fetch('/api/ai/generate-audio-only', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          suggestions: selectedSuggestions,
-          indices: Array.from(selectedScripts)
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to generate audio');
-      }
-
-      const audioResult = await response.json();
-      
-      // Update the result with new audio URLs
-      setResult(prevResult => {
-        if (!prevResult) return prevResult;
-        
-        const updatedSuggestions = [...prevResult.suggestions];
-        audioResult.suggestions.forEach((updatedSuggestion: any, resultIndex: number) => {
-          const originalIndex = Array.from(selectedScripts)[resultIndex];
-          updatedSuggestions[originalIndex] = updatedSuggestion;
-        });
-
-        return {
-          ...prevResult,
-          suggestions: updatedSuggestions
-        };
-      });
-
-      toast({
-        title: "Audio Generated!",
-        description: `Generated ${selectedScripts.size} audio recording${selectedScripts.size !== 1 ? 's' : ''}`,
-      });
-    } catch (error) {
-      toast({
-        title: "Audio Generation Failed",
-        description: error instanceof Error ? error.message : "Failed to generate audio",
-        variant: "destructive",
-      });
-    } finally {
-      setIsGeneratingAudio(false);
-    }
-  };
   const { isAuthenticated, logout, login } = useMetaAuth();
-
-  // Fetch background videos on component mount
-  React.useEffect(() => {
-    fetchBackgroundVideos();
-  }, []);
-
-  const fetchBackgroundVideos = async () => {
+  const loadBaseDatabase = async () => {
+    if (!spreadsheetId) return;
+    setIsLoadingBaseDatabase(true);
     try {
-      const response = await fetch('/api/video/status');
+      const response = await fetch(`/api/google-sheets/base-database?spreadsheetId=${encodeURIComponent(spreadsheetId.trim())}`);
       if (response.ok) {
         const data = await response.json();
-        setBackgroundVideos(data.backgroundVideos || []);
-        setIsDriveConfigured(data.driveConfigured || false);
-      }
-    } catch (error) {
-      console.error('Failed to fetch background videos:', error);
-    }
-  };
-
-  const fetchDriveVideos = async () => {
-    setIsLoadingDrive(true);
-    try {
-      const response = await fetch('/api/drive/videos');
-      if (response.ok) {
-        const data = await response.json();
-        setDriveVideos(data.videos || []);
+        const baseFilms = data.baseFilms || [];
+        setBaseDatabaseEntries(baseFilms);
+        if (baseFilms.length > 0) {
+          const stillValid = baseFilms.some((entry: any) => entry.baseId === selectedBaseId);
+          if (!selectedBaseId || !stillValid) {
+            setSelectedBaseId(baseFilms[0].baseId);
+          }
+        } else {
+          setSelectedBaseId('');
+        }
       } else {
-        const errorData = await response.json();
-        const isApiNotEnabled = errorData.details?.includes('Google Drive API') || errorData.error?.includes('not enabled');
-        
+        setBaseDatabaseEntries([]);
+        setSelectedBaseId('');
         toast({
-          title: "Drive Setup Required",
-          description: isApiNotEnabled 
-            ? "Google Drive API needs to be enabled in your Google Cloud Console. Check the console for the setup link."
-            : errorData.message || "Unable to access Google Drive",
-          variant: "destructive",
+          title: "Failed to load base database",
+          description: "Could not read Base_Database tab from Google Sheets",
+          variant: "destructive"
         });
       }
     } catch (error) {
+      console.error('Error loading base database:', error);
+      setBaseDatabaseEntries([]);
+      setSelectedBaseId('');
       toast({
-        title: "Drive Error",
-        description: "Failed to load Google Drive videos",
-        variant: "destructive",
+        title: "Error",
+        description: "Failed to load base films from Google Sheets",
+        variant: "destructive"
       });
     } finally {
-      setIsLoadingDrive(false);
-    }
-  };
-
-  const handleDriveVideoDownload = async (fileId: string, fileName: string) => {
-    setIsUploadingVideo(true);
-    try {
-      const response = await fetch('/api/drive/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId, fileName })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        toast({
-          title: "Video Downloaded!",
-          description: `"${fileName}" is now available as a background video`,
-        });
-        await fetchBackgroundVideos();
-        setShowDriveVideos(false);
-      } else {
-        throw new Error(result.error || 'Download failed');
-      }
-    } catch (error) {
-      toast({
-        title: "Download Failed",
-        description: error instanceof Error ? error.message : "Failed to download video",
-        variant: "destructive",
-      });
-    } finally {
-      setIsUploadingVideo(false);
-    }
-  };
-
-  const handleVideoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    const formData = new FormData();
-    Array.from(files).forEach(file => {
-      formData.append('videos', file);
-    });
-
-    setIsUploadingVideo(true);
-    try {
-      const response = await fetch('/api/video/upload-background', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to upload videos');
-      }
-
-      const result = await response.json();
-      
-      const uploadedCount = result.uploaded?.filter((f: any) => f.status === 'uploaded').length || 0;
-      const existingCount = result.uploaded?.filter((f: any) => f.status === 'already_exists').length || 0;
-      const failedCount = result.failed?.length || 0;
-      
-      let description = '';
-      if (uploadedCount > 0) {
-        description += `${uploadedCount} video${uploadedCount > 1 ? 's' : ''} uploaded successfully. `;
-      }
-      if (existingCount > 0) {
-        description += `${existingCount} video${existingCount > 1 ? 's' : ''} already existed. `;
-      }
-      if (failedCount > 0) {
-        description += `${failedCount} video${failedCount > 1 ? 's' : ''} failed.`;
-      }
-      
-      toast({
-        title: files.length === 1 ? "Video Uploaded!" : "Videos Uploaded!",
-        description: description.trim(),
-      });
-
-      // Refresh both background videos lists
-      await fetchBackgroundVideos();
-      
-      // Also refresh the dropdown list (availableBackgroundVideos)
-      const bgResponse = await fetch('/api/video/background-videos');
-      if (bgResponse.ok) {
-        const bgData = await bgResponse.json();
-        setAvailableBackgroundVideos(bgData.videos);
-      }
-      
-      // Clear the input
-      event.target.value = '';
-    } catch (error) {
-      toast({
-        title: "Upload Failed",
-        description: error instanceof Error ? error.message : "Failed to upload videos",
-        variant: "destructive",
-      });
-    } finally {
-      setIsUploadingVideo(false);
+      setIsLoadingBaseDatabase(false);
     }
   };
 
@@ -749,37 +534,19 @@ export default function Unified() {
       return;
     }
 
-    if (withAudio && availableBackgroundVideos.length > 0 && !selectedBackgroundVideo) {
-      toast({
-        title: "Background Video Required",
-        description: "Please select a background video for video generation",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setIsGenerating(true);
     setResult(null);
-    setSelectedScripts(new Set());
-    setIsGeneratingAudio(false);
 
     try {
-      // Get the selected background video details for Drive download
-      const selectedBgVideo = availableBackgroundVideos.find(v => v.driveId === selectedBackgroundVideo);
-      
       // Generate AI scripts using Guidance Primer
       const scriptRequestBody: any = {
         spreadsheetId: spreadsheetId.trim(),
-        generateAudio: withAudio,
+        generateAudio: false,
         scriptCount: scriptCount,
-        backgroundVideoDriveId: selectedBgVideo?.driveId,
-        backgroundVideoName: selectedBgVideo?.name,
-        voiceId: selectedVoice,
         language: selectedLanguage,
         experimentalPercentage: experimentalPercentage,
         individualGeneration: individualGeneration,
-        slackEnabled: slackEnabled,
-        includeSubtitles: includeSubtitles,
+        slackEnabled: false,
         llmProvider: llmProvider
       };
 
@@ -1019,93 +786,6 @@ export default function Unified() {
                 </div>
               )}
 
-              {/* Voice Selection */}
-              {iterationsScripts.length > 0 && availableVoices.length > 0 && (
-                <div className="space-y-2">
-                  <Label htmlFor="iterations-voice-selector">Voice Selection</Label>
-                  <Select value={selectedVoice} onValueChange={setSelectedVoice}>
-                    <SelectTrigger id="iterations-voice-selector">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-60 overflow-y-auto">
-                      {availableVoices.map((voice) => {
-                        const isGerman = voice.name.toLowerCase().includes('markus') || 
-                                         voice.name.toLowerCase().includes('carl') || 
-                                         voice.name.toLowerCase().includes('julia');
-                        return (
-                          <SelectItem key={voice.voice_id} value={voice.voice_id}>
-                            {isGerman && '🇩🇪 '}{voice.name}
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {/* Background Video Selection */}
-              {iterationsScripts.length > 0 && availableBackgroundVideos.length > 0 && (
-                <div className="space-y-2">
-                  <Label htmlFor="iterations-video-selector">Background Video (from Google Drive)</Label>
-                  <Select value={selectedBackgroundVideo} onValueChange={setSelectedBackgroundVideo}>
-                    <SelectTrigger id="iterations-video-selector">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-60 overflow-y-auto">
-                      {availableBackgroundVideos.map((video) => (
-                        <SelectItem key={video.driveId} value={video.driveId}>
-                          {video.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {/* Audio/Video Toggle */}
-              {iterationsScripts.length > 0 && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-center space-x-3">
-                    <Label htmlFor="iterations-audio-toggle" className="text-sm font-medium">
-                      Scripts only
-                    </Label>
-                    <Switch
-                      id="iterations-audio-toggle"
-                      checked={withAudio}
-                      onCheckedChange={setWithAudio}
-                      data-testid="toggle-iterations-audio"
-                    />
-                    <Label htmlFor="iterations-audio-toggle" className="text-sm font-medium">
-                      With audio{availableBackgroundVideos.length > 0 ? ' + video' : ''}
-                    </Label>
-                  </div>
-                  <p className="text-center text-sm text-gray-500">
-                    {withAudio 
-                      ? `Will generate iterations with professional voice recordings${availableBackgroundVideos.length > 0 && selectedBackgroundVideo ? ' and complete video assets' : ''}` 
-                      : 'Will generate iterations without audio recordings'
-                    }
-                  </p>
-                  
-                  {/* Subtitle Toggle */}
-                  {withAudio && availableBackgroundVideos.length > 0 && (
-                    <div className="flex items-center justify-center space-x-3 pt-2">
-                      <Label htmlFor="iterations-subtitle-toggle" className="text-sm font-medium">
-                        Without subtitles
-                      </Label>
-                      <Switch
-                        id="iterations-subtitle-toggle"
-                        checked={includeSubtitles}
-                        onCheckedChange={setIncludeSubtitles}
-                        data-testid="toggle-iterations-subtitles"
-                      />
-                      <Label htmlFor="iterations-subtitle-toggle" className="text-sm font-medium">
-                        With burned-in subtitles
-                      </Label>
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* Individual Generation Toggle */}
               {iterationsScripts.length > 0 && (
                 <div className="space-y-4 border-t pt-4">
@@ -1167,32 +847,6 @@ export default function Unified() {
                     {llmProvider === 'openai' && 'OpenAI GPT-5.1 - High quality reasoning'}
                     {llmProvider === 'groq' && 'Groq Llama 3.3 70B - Fast inference (requires API key)'}
                     {llmProvider === 'gemini' && 'Google Gemini 3 Pro - Uses Replit credits (no API key needed)'}
-                  </p>
-                </div>
-              )}
-
-              {/* Slack Toggle */}
-              {iterationsScripts.length > 0 && (
-                <div className="space-y-4 border-t pt-4">
-                  <div className="flex items-center justify-center space-x-3">
-                    <Label htmlFor="iterations-slack-toggle" className="text-sm font-medium">
-                      Slack OFF
-                    </Label>
-                    <Switch
-                      id="iterations-slack-toggle"
-                      checked={slackEnabled}
-                      onCheckedChange={setSlackEnabled}
-                      data-testid="toggle-iterations-slack"
-                    />
-                    <Label htmlFor="iterations-slack-toggle" className="text-sm font-medium">
-                      Slack ON
-                    </Label>
-                  </div>
-                  <p className="text-center text-sm text-gray-500">
-                    {slackEnabled 
-                      ? "Slack notifications enabled - Videos will be sent for approval after generation" 
-                      : "Slack notifications disabled - Testing mode, no approval workflow"
-                    }
                   </p>
                 </div>
               )}
@@ -1287,8 +941,7 @@ export default function Unified() {
                     ) : (
                       <>
                         <RefreshCw className="mr-2 h-4 w-4" />
-                        Generate {selectedIterationsScripts.size * iterationsCount} Iterations 
-                        {withAudio && ' + Audio/Video'}
+                        Generate {selectedIterationsScripts.size * iterationsCount} Iterations
                       </>
                     )}
                   </Button>
@@ -1318,7 +971,7 @@ export default function Unified() {
                 <CardHeader>
                   <CardTitle>Generated Iterations</CardTitle>
                   <CardDescription>
-                    Creative variations with optional voiceovers and video assets
+                    Creative variations ready for review and export
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1338,38 +991,6 @@ export default function Unified() {
                               <p className="text-sm text-gray-700 mb-3 italic">"{suggestion.content}"</p>
                             )}
                             <p className="text-xs text-blue-700">{suggestion.reasoning}</p>
-                            
-                            {suggestion.videoUrl && (
-                              <div className="bg-green-100 border border-green-300 rounded-lg p-3 mt-3">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Video className="h-4 w-4 text-green-600" />
-                                  <span className="text-sm font-medium text-green-800">Complete Video Asset:</span>
-                                </div>
-                                <video controls className="w-full max-h-60 rounded">
-                                  <source src={suggestion.videoUrl} type="video/mp4" />
-                                  Your browser does not support the video element.
-                                </video>
-                              </div>
-                            )}
-
-                            {suggestion.audioUrl && !suggestion.videoUrl && (
-                              <div className="bg-blue-100 border border-blue-300 rounded-lg p-3 mt-3">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Mic className="h-4 w-4 text-blue-600" />
-                                  <span className="text-sm font-medium text-blue-800">AI Voice Recording:</span>
-                                </div>
-                                <audio controls className="w-full">
-                                  <source src={suggestion.audioUrl} type="audio/mpeg" />
-                                  Your browser does not support the audio element.
-                                </audio>
-                              </div>
-                            )}
-
-                            {suggestion.videoError && (
-                              <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3 mt-3">
-                                <p className="text-xs text-yellow-700">{suggestion.videoError}</p>
-                              </div>
-                            )}
                           </div>
                         </CardContent>
                       </Card>
@@ -1549,283 +1170,6 @@ export default function Unified() {
             </p>
           </div>
 
-          {/* Background Video Upload */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-center space-x-3">
-              <Label htmlFor="video-upload" className="text-sm font-medium">
-                Background Videos ({backgroundVideos.length}):
-              </Label>
-              <div className="flex items-center gap-2">
-                <input
-                  id="video-upload"
-                  type="file"
-                  accept=".mp4,.mov,.avi,.mkv"
-                  multiple
-                  onChange={handleVideoUpload}
-                  disabled={isUploadingVideo}
-                  className="hidden"
-                />
-                <Button
-                  type="button"
-                  variant="default"
-                  size="sm"
-                  onClick={() => document.getElementById('video-upload')?.click()}
-                  disabled={isUploadingVideo}
-                  className="bg-black text-white hover:bg-gray-800"
-                >
-                  {isUploadingVideo ? (
-                    <>
-                      <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                      UPLOADING...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="mr-2 h-3 w-3" />
-                      UPLOAD VIDEO(S)
-                    </>
-                  )}
-                </Button>
-                {isDriveConfigured && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setShowDriveVideos(!showDriveVideos);
-                      if (!showDriveVideos) {
-                        fetchDriveVideos();
-                      }
-                    }}
-                    disabled={isLoadingDrive}
-                  >
-                    {isLoadingDrive ? (
-                      <>
-                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                        Loading...
-                      </>
-                    ) : (
-                      <>
-                        <Calendar className="mr-2 h-3 w-3" />
-                        Google Drive
-                      </>
-                    )}
-                  </Button>
-                )}
-              </div>
-            </div>
-            <p className="text-center text-xs text-gray-500">
-              {backgroundVideos.length > 0 
-                ? `Available: ${backgroundVideos.join(', ')}. Videos will be automatically created when audio is generated.`
-                : "Upload background videos (.mp4, .mov, .avi, .mkv) to automatically create complete video assets."
-              }
-              {isDriveConfigured && " You can also import videos from Google Drive (requires Drive API to be enabled)."}
-            </p>
-
-            {/* Google Drive Video Browser */}
-            {showDriveVideos && (
-              <div className="mt-4 p-4 border rounded-lg bg-gray-50">
-                <h4 className="font-medium mb-3">Google Drive Videos</h4>
-                {isLoadingDrive ? (
-                  <div className="text-center py-4">
-                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                    <p className="text-sm text-gray-600">Loading videos from Google Drive...</p>
-                  </div>
-                ) : driveVideos.length === 0 ? (
-                  <p className="text-sm text-gray-600 text-center py-4">No videos found in Google Drive</p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
-                    {driveVideos.map((video) => (
-                      <div key={video.id} className="flex items-center justify-between p-3 bg-white rounded border">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{video.name}</p>
-                          <p className="text-xs text-gray-500">
-                            {video.formattedSize} • {video.mimeType?.split('/')[1]?.toUpperCase()}
-                          </p>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleDriveVideoDownload(video.id, video.name)}
-                          disabled={isUploadingVideo}
-                          className="ml-2"
-                        >
-                          Download
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Background Video Selector */}
-          <div className="space-y-3 border-2 border-purple-200 rounded-lg p-4 bg-purple-50">
-            <Label className="text-lg font-semibold flex items-center gap-2">
-              <Video className="h-5 w-5 text-purple-600" />
-              Background Video Selection
-            </Label>
-            <p className="text-sm text-gray-600">Choose which video to use as background for AI-generated content</p>
-            
-            {loadingVideos ? (
-              <div className="flex items-center gap-2 text-sm text-gray-500 p-3 border rounded-md bg-white">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading videos...
-              </div>
-            ) : availableBackgroundVideos.length > 0 ? (
-              <div className="bg-white p-3 rounded-md border space-y-3">
-                <div className="text-sm font-medium">Base Films from Google Drive: {availableBackgroundVideos.length}</div>
-                <Select value={selectedBackgroundVideo} onValueChange={setSelectedBackgroundVideo}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Choose a background video">
-                      {selectedBackgroundVideo ? availableBackgroundVideos.find(v => v.driveId === selectedBackgroundVideo)?.name : 'Choose a background video'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableBackgroundVideos.map((video) => (
-                      <SelectItem key={video.driveId} value={video.driveId}>
-                        <div className="flex items-center gap-2">
-                          <Video className="h-4 w-4 text-purple-600" />
-                          <span className="truncate">{video.name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {/* Native dropdown fallback */}
-                <select 
-                  value={selectedBackgroundVideo} 
-                  onChange={(e) => setSelectedBackgroundVideo(e.target.value)}
-                  className="w-full p-2 border rounded-md bg-white text-sm"
-                >
-                  <option value="">Select video...</option>
-                  {availableBackgroundVideos.map((video) => (
-                    <option key={video.driveId} value={video.driveId}>
-                      {video.name}
-                    </option>
-                  ))}
-                </select>
-                {selectedBackgroundVideo && (
-                  <div className="border rounded-md p-2 bg-gray-50">
-                    <div className="text-xs font-medium mb-1">Selected:</div>
-                    <p className="text-sm text-gray-600">
-                      {availableBackgroundVideos.find(v => v.driveId === selectedBackgroundVideo)?.name}
-                    </p>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="text-sm text-amber-700 bg-amber-100 p-3 rounded-md border border-amber-300">
-                <div className="flex items-center gap-2 mb-1">
-                  <Video className="h-4 w-4" />
-                  <strong>No background videos found</strong>
-                </div>
-                <p>Upload videos above to generate video content with your scripts.</p>
-              </div>
-            )}
-          </div>
-
-          {/* Voice Selection */}
-          {withAudio && (
-            <div className="space-y-3 border-2 border-blue-200 rounded-lg p-4 bg-blue-50">
-              <Label className="text-lg font-semibold flex items-center gap-2">
-                <User className="h-5 w-5 text-blue-600" />
-                Voice Selection
-              </Label>
-              <p className="text-sm text-gray-600">Choose the ElevenLabs voice for AI-generated audio</p>
-              
-              <div className="bg-white p-3 rounded-md border space-y-3">
-                {loadingVoices ? (
-                  <div className="flex items-center gap-2 text-sm text-gray-500 p-3 border rounded-md">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading voices from ElevenLabs...
-                  </div>
-                ) : (
-                  <>
-                    <div className="text-sm font-medium">Available Voices: {availableVoices.length}</div>
-                    <Select value={selectedVoice} onValueChange={setSelectedVoice}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Choose a voice">
-                          {availableVoices.find(v => v.voice_id === selectedVoice)?.name || 'Select voice'}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableVoices.map((voice) => (
-                          <SelectItem key={voice.voice_id} value={voice.voice_id}>
-                            <div className="flex items-center gap-2">
-                              <User className="h-4 w-4 text-blue-600" />
-                              <span>{voice.name}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    
-                    {/* Native dropdown fallback */}
-                    <select 
-                      value={selectedVoice} 
-                      onChange={(e) => setSelectedVoice(e.target.value)}
-                      className="w-full p-2 border rounded-md bg-white text-sm"
-                    >
-                      {availableVoices.map((voice) => (
-                        <option key={voice.voice_id} value={voice.voice_id}>
-                          {voice.name}
-                        </option>
-                      ))}
-                    </select>
-                    
-                    <div className="text-xs text-gray-500">
-                      <strong>Selected:</strong> {availableVoices.find(v => v.voice_id === selectedVoice)?.name || 'Unknown voice'}
-                      <br />
-                      <strong>Voice ID:</strong> {selectedVoice}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Audio Generation Toggle */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-center space-x-3">
-              <Label htmlFor="audio-toggle" className="text-sm font-medium">
-                Scripts only
-              </Label>
-              <Switch
-                id="audio-toggle"
-                checked={withAudio}
-                onCheckedChange={setWithAudio}
-              />
-              <Label htmlFor="audio-toggle" className="text-sm font-medium">
-                With audio{availableBackgroundVideos.length > 0 ? ' + video' : ''}
-              </Label>
-            </div>
-            <p className="text-center text-sm text-gray-500">
-              {withAudio 
-                ? `Will generate ${scriptCount} scripts with professional voice recordings${availableBackgroundVideos.length > 0 && selectedBackgroundVideo ? ' and complete video assets' : ''}` 
-                : `Will generate ${scriptCount} scripts without audio recordings`
-              }
-            </p>
-            
-            {/* Subtitle Toggle */}
-            {withAudio && availableBackgroundVideos.length > 0 && (
-              <div className="flex items-center justify-center space-x-3 pt-2">
-                <Label htmlFor="subtitle-toggle" className="text-sm font-medium">
-                  Without subtitles
-                </Label>
-                <Switch
-                  id="subtitle-toggle"
-                  checked={includeSubtitles}
-                  onCheckedChange={setIncludeSubtitles}
-                  data-testid="toggle-subtitles"
-                />
-                <Label htmlFor="subtitle-toggle" className="text-sm font-medium">
-                  With burned-in subtitles
-                </Label>
-              </div>
-            )}
-          </div>
-
           {/* Individual Generation Toggle */}
           <div className="space-y-4 border-t pt-4">
             <div className="flex items-center justify-center space-x-3">
@@ -1889,30 +1233,6 @@ export default function Unified() {
             </div>
           )}
 
-          {/* Slack Notifications Toggle */}
-          <div className="space-y-4 border-t pt-4">
-            <div className="flex items-center justify-center space-x-3">
-              <Label htmlFor="slack-toggle" className="text-sm font-medium">
-                Slack OFF
-              </Label>
-              <Switch
-                id="slack-toggle"
-                checked={slackEnabled}
-                onCheckedChange={setSlackEnabled}
-                data-testid="toggle-slack-notifications"
-              />
-              <Label htmlFor="slack-toggle" className="text-sm font-medium">
-                Slack ON
-              </Label>
-            </div>
-            <p className="text-center text-sm text-gray-500">
-              {slackEnabled 
-                ? "Slack notifications enabled - Videos will be sent for approval after generation" 
-                : "Slack notifications disabled - Testing mode, no approval workflow"
-              }
-            </p>
-          </div>
-
           {/* Generate Button */}
           <Button 
             onClick={handleGenerate} 
@@ -1928,7 +1248,7 @@ export default function Unified() {
             ) : (
               <>
                 <Zap className="mr-2 h-4 w-4" />
-                Generate {scriptCount} Script{scriptCount !== 1 ? 's' : ''} {withAudio && '+ Audio'}
+                Generate {scriptCount} Script{scriptCount !== 1 ? 's' : ''}
               </>
             )}
           </Button>
@@ -1956,134 +1276,39 @@ export default function Unified() {
           {/* Script Suggestions Preview */}
           <Card>
             <CardHeader>
-              <CardTitle>Generated Creative Assets</CardTitle>
+              <CardTitle>Generated Scripts</CardTitle>
               <CardDescription>
-                AI-generated scripts with optional voiceovers and complete video assets ready for Meta campaigns
+                AI-generated scripts ready for review and export
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {/* Bulk Audio Generation Controls (only show if scripts were generated without audio) */}
-              {result.suggestions.some(s => !s.audioUrl) && (
-                <div className="mb-6 p-4 bg-gray-50 rounded-lg border">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id="select-all"
-                        checked={selectedScripts.size === result.suggestions.length}
-                        onCheckedChange={handleSelectAllScripts}
-                      />
-                      <Label htmlFor="select-all" className="text-sm font-medium">
-                        Select all scripts
-                      </Label>
-                    </div>
-                    <Button
-                      onClick={handleGenerateAudioForSelected}
-                      disabled={selectedScripts.size === 0 || isGeneratingAudio}
-                      size="sm"
-                      className="ml-4"
-                    >
-                      {isGeneratingAudio ? (
-                        <>
-                          <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                          Generating Audio...
-                        </>
-                      ) : (
-                        <>
-                          <Mic className="mr-2 h-3 w-3" />
-                          Generate Audio ({selectedScripts.size})
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                  <p className="text-xs text-gray-600">
-                    Select which scripts to convert to professional voice recordings using Ella AI
-                  </p>
-                </div>
-              )}
-
               <div className="space-y-4">
                 {result.suggestions.map((suggestion, index) => (
                   <Card key={index} className="bg-blue-50 border-blue-200">
                     <CardContent className="pt-4">
-                      <div className="flex items-start gap-3">
-                        {/* Checkbox for script selection (only show if no audio) */}
-                        {!suggestion.audioUrl && (
-                          <Checkbox
-                            id={`script-${index}`}
-                            checked={selectedScripts.has(index)}
-                            onCheckedChange={(checked) => handleScriptSelection(index, checked as boolean)}
-                            className="mt-1"
-                          />
+                      <div className="flex-1">
+                        <h4 className="font-medium text-blue-900 mb-2">{suggestion.title}</h4>
+                        {/* Display native language script if available */}
+                        {suggestion.nativeContent ? (
+                          <div className="mb-3">
+                            <p className="text-sm text-gray-900 mb-1 font-medium italic">"{suggestion.nativeContent}"</p>
+                            <p className="text-xs text-gray-600 mb-1">English translation:</p>
+                            <p className="text-sm text-gray-700 italic">"{suggestion.content}"</p>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-700 mb-3 italic">"{suggestion.content}"</p>
                         )}
+                        <p className="text-xs text-blue-700">{suggestion.reasoning}</p>
                         
-                        <div className="flex-1">
-                          <h4 className="font-medium text-blue-900 mb-2">{suggestion.title}</h4>
-                          {/* Display native language script if available */}
-                          {suggestion.nativeContent ? (
-                            <div className="mb-3">
-                              <p className="text-sm text-gray-900 mb-1 font-medium italic">"{suggestion.nativeContent}"</p>
-                              <p className="text-xs text-gray-600 mb-1">English translation:</p>
-                              <p className="text-sm text-gray-700 italic">"{suggestion.content}"</p>
-                            </div>
-                          ) : (
-                            <p className="text-sm text-gray-700 mb-3 italic">"{suggestion.content}"</p>
-                          )}
-                          <p className="text-xs text-blue-700">{suggestion.reasoning}</p>
-                          
-                          {/* Video Player (if available) */}
-                          {suggestion.videoUrl && (
-                            <div className="bg-green-100 border border-green-300 rounded-lg p-3 mt-3">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Upload className="h-4 w-4 text-green-600" />
-                                <span className="text-sm font-medium text-green-800">Complete Video Asset:</span>
-                              </div>
-                              <video controls className="w-full max-h-60 rounded">
-                                <source src={suggestion.videoUrl} type="video/mp4" />
-                                Your browser does not support the video element.
-                              </video>
-                              <p className="text-xs text-green-700 mt-2">
-                                Ready-to-use video with voiceover for Meta campaigns
-                              </p>
-                            </div>
-                          )}
-
-                          {/* Audio Player (if no video available) */}
-                          {suggestion.audioUrl && !suggestion.videoUrl && (
-                            <div className="bg-blue-100 border border-blue-300 rounded-lg p-3 mt-3">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Mic className="h-4 w-4 text-blue-600" />
-                                <span className="text-sm font-medium text-blue-800">AI Voice Recording:</span>
-                              </div>
-                              <audio controls className="w-full">
-                                <source src={suggestion.audioUrl} type="audio/mpeg" />
-                                Your browser does not support the audio element.
-                              </audio>
-                            </div>
-                          )}
-
-                          {/* Video Error */}
-                          {suggestion.videoError && (
-                            <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3 mt-3">
-                              <div className="flex items-center gap-2 mb-1">
-                                <Upload className="h-4 w-4 text-yellow-600" />
-                                <span className="text-sm font-medium text-yellow-800">Video Creation:</span>
-                              </div>
-                              <p className="text-xs text-yellow-700">
-                                {suggestion.videoError}
-                              </p>
-                            </div>
-                          )}
-                          
-                          {suggestion.targetMetrics && suggestion.targetMetrics.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {suggestion.targetMetrics.map((metric) => (
-                                <span key={metric} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
-                                  {metric}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                        {suggestion.targetMetrics && suggestion.targetMetrics.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {suggestion.targetMetrics.map((metric) => (
+                              <span key={metric} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
+                                {metric}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
@@ -2193,6 +1418,53 @@ export default function Unified() {
               </div>
             )}
 
+            {/* Base Film Selection */}
+            {spreadsheetId && (
+              <div className="space-y-2">
+                <Label htmlFor="base-id-selector">Base Film (Base_Database)</Label>
+                {isLoadingBaseDatabase ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-500 p-3 border rounded-md bg-white">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading Base_IDs...
+                  </div>
+                ) : baseDatabaseEntries.length > 0 ? (
+                  <div className="space-y-2">
+                    <Select value={selectedBaseId} onValueChange={setSelectedBaseId}>
+                      <SelectTrigger id="base-id-selector">
+                        <SelectValue placeholder="Select a Base_ID" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-60 overflow-y-auto">
+                        {baseDatabaseEntries.map((entry) => (
+                          <SelectItem key={entry.baseId} value={entry.baseId}>
+                            {entry.baseId}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <select
+                      value={selectedBaseId}
+                      onChange={(e) => setSelectedBaseId(e.target.value)}
+                      className="w-full p-2 border rounded-md bg-white text-sm"
+                    >
+                      <option value="">Select Base_ID...</option>
+                      {baseDatabaseEntries.map((entry) => (
+                        <option key={entry.baseId} value={entry.baseId}>
+                          {entry.baseId}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="text-sm text-amber-700 bg-amber-100 p-3 rounded-md border border-amber-300">
+                    No Base_IDs found in Base_Database (requires Base_Id in column A and file_link in column G).
+                  </div>
+                )}
+                <p className="text-xs text-gray-500">
+                  Uses the Base_Database tab from your spreadsheet.
+                </p>
+              </div>
+            )}
+
             {/* Voice Selection */}
             {availableVoices.length > 0 && (
               <div className="space-y-2">
@@ -2217,63 +1489,8 @@ export default function Unified() {
               </div>
             )}
 
-            {/* Background Video Selection (Multi-select) */}
-            {availableBackgroundVideos.length > 0 && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Background Videos</Label>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      if (selectedBackgroundVideosMulti.length === availableBackgroundVideos.length) {
-                        setSelectedBackgroundVideosMulti([]);
-                      } else {
-                        setSelectedBackgroundVideosMulti(availableBackgroundVideos.map(v => v.driveId));
-                      }
-                    }}
-                  >
-                    {selectedBackgroundVideosMulti.length === availableBackgroundVideos.length ? 'Deselect All' : 'Select All'}
-                  </Button>
-                </div>
-                <Card className="p-4 max-h-48 overflow-y-auto">
-                  <div className="space-y-3">
-                    {availableBackgroundVideos.map((video) => (
-                      <div key={video.driveId} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`video-${video.driveId}`}
-                          checked={selectedBackgroundVideosMulti.includes(video.driveId)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedBackgroundVideosMulti([...selectedBackgroundVideosMulti, video.driveId]);
-                            } else {
-                              setSelectedBackgroundVideosMulti(selectedBackgroundVideosMulti.filter(p => p !== video.driveId));
-                            }
-                          }}
-                          data-testid={`checkbox-video-${video.name}`}
-                        />
-                        <Label
-                          htmlFor={`video-${video.driveId}`}
-                          className="text-sm font-normal cursor-pointer flex items-center gap-2"
-                        >
-                          <Video className="h-4 w-4 text-purple-600" />
-                          {video.name}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-                <p className="text-xs text-gray-500">
-                  {selectedBackgroundVideosMulti.length === 0 
-                    ? "Select one or more background videos"
-                    : `${selectedBackgroundVideosMulti.length} video${selectedBackgroundVideosMulti.length === 1 ? '' : 's'} selected - each script will be created with each video`
-                  }
-                </p>
-              </div>
-            )}
-
             {/* Subtitle Toggle */}
-            {availableBackgroundVideos.length > 0 && (
+            {baseDatabaseEntries.length > 0 && (
               <div className="flex items-center justify-center space-x-3 border-t pt-4">
                 <Label htmlFor="subtitle-toggle-process" className="text-sm font-medium">
                   Without subtitles
@@ -2329,7 +1546,7 @@ export default function Unified() {
                 
                 <Button
                   onClick={handleProcessExistingScripts}
-                  disabled={isProcessingScripts || selectedExistingScripts.size === 0}
+                  disabled={isProcessingScripts || selectedExistingScripts.size === 0 || !selectedBaseId}
                   className="w-full"
                 >
                   {isProcessingScripts ? (
