@@ -344,17 +344,17 @@ Respond in JSON format:
         console.log('Voice generation skipped. includeVoice:', includeVoice, 'isConfigured:', elevenLabsService.isConfigured());
       }
 
-      // Record scripts to the central script_database
+      // Record scripts to Script_Database tab in the same spreadsheet
       try {
         const scriptsToRecord = suggestions.map(s => ({
           language: language,
           scriptCopy: s.nativeContent || s.content,
           aiModel: s.llmModel || llmProvider
         }));
-        await googleSheetsService.recordScriptsToDatabase(scriptsToRecord);
-        console.log('Scripts recorded to script_database');
+        await googleSheetsService.recordScriptsToDatabase(spreadsheetId, scriptsToRecord);
+        console.log('Scripts recorded to Script_Database tab');
       } catch (dbError) {
-        console.error('Error recording to script_database (continuing):', dbError);
+        console.error('Error recording to Script_Database (continuing):', dbError);
       }
 
       return {
@@ -372,6 +372,7 @@ Respond in JSON format:
    * Generate iterations/variations of existing scripts
    */
   async generateIterations(
+    spreadsheetId: string,
     sourceScripts: any[],
     options: {
       iterationsPerScript?: number;
@@ -591,17 +592,17 @@ OUTPUT FORMAT (strict JSON):
         }
       }
 
-      // Record iterations to the central script_database
+      // Record iterations to Script_Database tab in the same spreadsheet
       try {
         const scriptsToRecord = suggestions.map(s => ({
           language: language,
           scriptCopy: s.nativeContent || s.content,
           aiModel: s.llmModel || llmProvider
         }));
-        await googleSheetsService.recordScriptsToDatabase(scriptsToRecord);
-        console.log('Iterations recorded to script_database');
+        await googleSheetsService.recordScriptsToDatabase(spreadsheetId, scriptsToRecord);
+        console.log('Iterations recorded to Script_Database tab');
       } catch (dbError) {
-        console.error('Error recording iterations to script_database (continuing):', dbError);
+        console.error('Error recording iterations to Script_Database (continuing):', dbError);
       }
 
       return {
@@ -806,10 +807,10 @@ Output format (JSON):
       });
 
       try {
-        await googleSheetsService.recordScriptsToDatabase(scriptDatabaseEntries);
-        console.log(`Also recorded ${suggestions.length} scripts to central script_database`);
+        await googleSheetsService.recordScriptsToDatabase(spreadsheetId, scriptDatabaseEntries);
+        console.log(`Also recorded ${suggestions.length} scripts to Script_Database tab`);
       } catch (dbError) {
-        console.error('Error recording to central script_database (continuing):', dbError);
+        console.error('Error recording to Script_Database (continuing):', dbError);
       }
 
     } catch (error) {

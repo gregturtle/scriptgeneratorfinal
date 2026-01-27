@@ -520,21 +520,17 @@ class GoogleSheetsService {
     }
   }
 
-  /**
-   * The central script database spreadsheet ID
-   * All generated scripts are recorded here in the script_database tab
-   */
-  private readonly SCRIPT_DATABASE_SPREADSHEET_ID = '1elJajodJA1zfzhdlPklw7iTiTaWD11Ij';
   private readonly SCRIPT_DATABASE_TAB_NAME = 'Script_Database';
 
   /**
-   * Get the latest BatchID and ScriptID from script_database tab
+   * Get the latest BatchID and ScriptID from Script_Database tab
    * Parses IDs in format sb00001 and s00001
    */
-  async getLatestScriptDatabaseIds(): Promise<{ lastBatchNum: number; lastScriptNum: number }> {
+  async getLatestScriptDatabaseIds(spreadsheetId: string): Promise<{ lastBatchNum: number; lastScriptNum: number }> {
     try {
+      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
       const response = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: this.SCRIPT_DATABASE_SPREADSHEET_ID,
+        spreadsheetId: cleanSpreadsheetId,
         range: `${this.SCRIPT_DATABASE_TAB_NAME}!A:B`,
       });
 
@@ -570,16 +566,17 @@ class GoogleSheetsService {
 
       return { lastBatchNum, lastScriptNum };
     } catch (error: any) {
-      console.error('Error getting latest script_database IDs:', error);
+      console.error('Error getting latest Script_Database IDs:', error);
       return { lastBatchNum: 0, lastScriptNum: 0 };
     }
   }
 
   /**
-   * Record scripts to the central script_database tab
+   * Record scripts to the Script_Database tab in the user's spreadsheet
    * Format: script_batch_id | script_id | timestamp | language_id | script_copy | ai_model | status
    */
   async recordScriptsToDatabase(
+    spreadsheetId: string,
     scripts: Array<{
       language: string;
       scriptCopy: string;
@@ -587,7 +584,8 @@ class GoogleSheetsService {
     }>
   ): Promise<{ batchId: string; scriptIds: string[] }> {
     try {
-      const { lastBatchNum, lastScriptNum } = await this.getLatestScriptDatabaseIds();
+      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
+      const { lastBatchNum, lastScriptNum } = await this.getLatestScriptDatabaseIds(cleanSpreadsheetId);
 
       const newBatchNum = lastBatchNum + 1;
       const batchId = `sb${String(newBatchNum).padStart(5, '0')}`;
@@ -612,8 +610,8 @@ class GoogleSheetsService {
         ];
       });
 
-      await this.appendDataToTab(this.SCRIPT_DATABASE_SPREADSHEET_ID, this.SCRIPT_DATABASE_TAB_NAME, rows);
-      console.log(`Recorded ${scripts.length} scripts to script_database (Batch: ${batchId}, Scripts: ${scriptIds[0]}-${scriptIds[scriptIds.length - 1]})`);
+      await this.appendDataToTab(cleanSpreadsheetId, this.SCRIPT_DATABASE_TAB_NAME, rows);
+      console.log(`Recorded ${scripts.length} scripts to Script_Database (Batch: ${batchId}, Scripts: ${scriptIds[0]}-${scriptIds[scriptIds.length - 1]})`);
       
       return { batchId, scriptIds };
     } catch (error) {

@@ -517,6 +517,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
 
       // Generate iterations using AI script service
       const result = await aiScriptService.generateIterations(
+        spreadsheetId,
         sourceScripts,
         {
           iterationsPerScript,
