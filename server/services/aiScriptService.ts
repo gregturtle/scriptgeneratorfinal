@@ -805,8 +805,12 @@ Output format (JSON):
         };
       });
 
-      await googleSheetsService.recordScriptsToDatabase(scriptDatabaseEntries);
-      console.log(`Also recorded ${suggestions.length} scripts to central script_database`);
+      try {
+        await googleSheetsService.recordScriptsToDatabase(scriptDatabaseEntries);
+        console.log(`Also recorded ${suggestions.length} scripts to central script_database`);
+      } catch (dbError) {
+        console.error('Error recording to central script_database (continuing):', dbError);
+      }
 
     } catch (error) {
       console.error("Error saving suggestions to Google Sheets:", error);
