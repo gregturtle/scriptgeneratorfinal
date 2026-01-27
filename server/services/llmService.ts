@@ -65,7 +65,7 @@ function parseJsonResponse(content: string): any {
 }
 
 async function generateWithOpenAI(request: LLMRequest): Promise<LLMResponse> {
-  const model = "gpt-5.1";
+  const model = "gpt-5.2";
   
   const temperatureMap = {
     'low': 0.3,
@@ -207,7 +207,7 @@ export function isProviderAvailable(provider: LLMProvider): boolean {
 
 export function getAvailableProviders(): { id: string; name: string; available: boolean; model: string }[] {
   return [
-    { id: 'openai', name: 'OpenAI', available: isProviderAvailable('openai'), model: 'GPT-5.1' },
+    { id: 'openai', name: 'OpenAI', available: isProviderAvailable('openai'), model: 'GPT-5.2' },
     { id: 'groq', name: 'Groq', available: isProviderAvailable('groq'), model: 'Llama 3.3 70B' },
     { id: 'gemini', name: 'Gemini', available: isProviderAvailable('gemini'), model: 'Gemini 3 Pro' },
   ];
