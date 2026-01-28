@@ -809,6 +809,117 @@ class GoogleSheetsService {
       throw error;
     }
   }
+
+  private readonly ASSET_DATABASE_TAB_NAME = 'Asset_Database';
+
+  /**
+   * Write asset entries to Asset_Database tab and read back the auto-generated File_Name
+   * Uses append API to ensure reliable row targeting
+   * Writes: Column E (Base_Id), Column H (Script_Id), Column L (Subtitled Y/N)
+   * Reads back: Column A (File_Name - formula generated)
+   */
+  async writeAssetEntries(
+    spreadsheetId: string,
+    entries: Array<{
+      baseId: string;
+      scriptId: string;
+      subtitled: boolean;
+    }>
+  ): Promise<Array<{ fileName: string; baseId: string; scriptId: string }>> {
+    try {
+      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
+      
+      console.log(`Writing ${entries.length} asset entries to Asset_Database using append`);
+
+      // Build rows for append - columns E through L (8 columns)
+      // E=Base_Id, F=empty, G=empty, H=Script_Id, I=empty, J=empty, K=empty, L=Subtitled
+      const rows = entries.map(entry => [
+        entry.baseId,  // Column E
+        '',            // Column F (formula)
+        '',            // Column G (formula)
+        entry.scriptId, // Column H
+        '',            // Column I (formula)
+        '',            // Column J (formula)
+        '',            // Column K (formula)
+        entry.subtitled ? 'Y' : 'N'  // Column L
+      ]);
+      
+      // Use append API with INSERT_ROWS to get exact row range back
+      const appendResponse = await this.sheets.spreadsheets.values.append({
+        spreadsheetId: cleanSpreadsheetId,
+        range: `${this.ASSET_DATABASE_TAB_NAME}!E:L`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: rows }
+      });
+      
+      // Extract the actual row range that was written
+      const updatedRange = appendResponse.data.updates?.updatedRange || '';
+      console.log(`Appended ${entries.length} entries to Asset_Database. Updated range: ${updatedRange}`);
+      
+      // Parse the row numbers from the updated range (e.g., "Asset_Database!E5:L7" -> rows 5-7)
+      const rangeMatch = updatedRange.match(/!E(\d+):L(\d+)/);
+      if (!rangeMatch) {
+        console.error('Could not parse updated range:', updatedRange);
+        throw new Error('Failed to determine written row range');
+      }
+      
+      const startRow = parseInt(rangeMatch[1]);
+      const endRow = parseInt(rangeMatch[2]);
+      
+      console.log(`Written to rows ${startRow} to ${endRow}`);
+      
+      // Wait for formulas to recalculate
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Poll for File_Names with retry logic from the exact written rows
+      let fileNames: any[][] = [];
+      let attempts = 0;
+      const maxAttempts = 3;
+      
+      while (attempts < maxAttempts) {
+        const fileNamesResponse = await this.sheets.spreadsheets.values.get({
+          spreadsheetId: cleanSpreadsheetId,
+          range: `${this.ASSET_DATABASE_TAB_NAME}!A${startRow}:A${endRow}`,
+        });
+        
+        fileNames = fileNamesResponse.data.values || [];
+        
+        // Check if all File_Names are populated
+        const allPopulated = fileNames.length === entries.length && 
+          fileNames.every(row => row[0] && row[0].toString().trim() !== '');
+        
+        if (allPopulated) {
+          break;
+        }
+        
+        attempts++;
+        if (attempts < maxAttempts) {
+          console.log(`File_Names not fully populated, waiting 1 second before retry (attempt ${attempts}/${maxAttempts})`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      
+      // Build results
+      const results: Array<{ fileName: string; baseId: string; scriptId: string }> = [];
+      
+      for (let i = 0; i < entries.length; i++) {
+        const fileName = fileNames[i]?.[0] || `asset_${entries[i].scriptId}_${entries[i].baseId}`;
+        results.push({
+          fileName,
+          baseId: entries[i].baseId,
+          scriptId: entries[i].scriptId
+        });
+        console.log(`Asset entry ${i + 1}: File_Name=${fileName}`);
+      }
+      
+      console.log(`Successfully wrote ${entries.length} entries to Asset_Database`);
+      return results;
+    } catch (error) {
+      console.error('Error writing to Asset_Database:', error);
+      throw error;
+    }
+  }
 }
 
 export const googleSheetsService = new GoogleSheetsService();

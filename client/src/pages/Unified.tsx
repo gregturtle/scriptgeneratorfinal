@@ -309,7 +309,8 @@ export default function Unified() {
           },
           sendToSlack: slackEnabled,
           slackNotificationDelay: slackEnabled ? 15 : 0, // 15 minute delay if Slack is enabled
-          includeSubtitles: includeSubtitles
+          includeSubtitles: includeSubtitles,
+          spreadsheetId: spreadsheetId
         })
       });
 

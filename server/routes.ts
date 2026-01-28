@@ -1562,7 +1562,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         backgroundVideosDrive = [],
         sendToSlack,
         slackNotificationDelay = 0,
-        includeSubtitles = false
+        includeSubtitles = false,
+        spreadsheetId
       } = req.body;
       
       if (!scripts || !Array.isArray(scripts)) {
@@ -1572,16 +1573,47 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       const backgroundCount = baseVideo?.fileLink ? 1 : (backgroundVideosDrive.length || selectedBackgroundVideos.length);
       console.log(`Processing ${scripts.length} existing scripts into videos with ${backgroundCount} background video${backgroundCount === 1 ? '' : 's'}`);
 
+      // Write to Asset_Database and get auto-generated File_Names
+      let assetEntries: Array<{ fileName: string; baseId: string; scriptId: string }> = [];
+      if (spreadsheetId && baseVideo?.baseId) {
+        try {
+          const entries = scripts.map((script: any) => ({
+            baseId: baseVideo.baseId,
+            scriptId: script.scriptTitle, // scriptTitle contains the scriptId
+            subtitled: includeSubtitles
+          }));
+          
+          assetEntries = await googleSheetsService.writeAssetEntries(spreadsheetId, entries);
+          console.log(`Got ${assetEntries.length} File_Names from Asset_Database`);
+        } catch (assetError) {
+          console.error('Error writing to Asset_Database:', assetError);
+          // Continue without Asset_Database if it fails
+        }
+      }
+
+      // Build a map of Asset_Database entries by scriptId for reliable matching
+      const assetEntriesMap = new Map<string, { fileName: string; baseId: string; scriptId: string }>();
+      for (const entry of assetEntries) {
+        assetEntriesMap.set(entry.scriptId, entry);
+      }
+
       // Transform the scripts from Google Sheets format to the format expected by our services
-      const formattedScripts = scripts.map((script, index) => ({
-        title: script.scriptTitle,
-        content: script.content || script.nativeContent, // Use English content if available, otherwise native
-        nativeContent: script.nativeContent,
-        language: script.recordingLanguage === 'English' ? 'en' : language,
-        reasoning: script.reasoning,
-        notableAdjustments: script.translationNotes,
-        fileName: generateScriptFileName(index, script.scriptTitle)
-      }));
+      const formattedScripts = scripts.map((script, index) => {
+        // Use File_Name from Asset_Database if available (matched by scriptId), otherwise generate one
+        const scriptId = script.scriptTitle; // scriptTitle contains the scriptId
+        const assetEntry = assetEntriesMap.get(scriptId);
+        const fileName = assetEntry?.fileName || generateScriptFileName(index, scriptId);
+        
+        return {
+          title: script.scriptTitle,
+          content: script.content || script.nativeContent, // Use English content if available, otherwise native
+          nativeContent: script.nativeContent,
+          language: script.recordingLanguage === 'English' ? 'en' : language,
+          reasoning: script.reasoning,
+          notableAdjustments: script.translationNotes,
+          fileName
+        };
+      });
 
       // Generate audio for the scripts (once per script)
       const voiceIdToUse = voiceId || 'huvDR9lwwSKC0zEjZUox'; // Default to Ella AI
