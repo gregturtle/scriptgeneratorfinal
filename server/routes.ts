@@ -744,10 +744,12 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
 
   // Slack webhook endpoint for handling button interactions
   app.post('/api/slack/interactions', express.urlencoded({ extended: true }), async (req, res) => {
+    console.log('[SLACK WEBHOOK] ===== RECEIVED REQUEST =====');
     try {
       // Debug: Log what we receive
       console.log('[SLACK WEBHOOK] Raw body type:', typeof req.body);
       console.log('[SLACK WEBHOOK] Raw body keys:', req.body ? Object.keys(req.body) : 'none');
+      console.log('[SLACK WEBHOOK] Has payload key:', req.body?.payload ? 'yes' : 'no');
       
       // Handle different body parsing scenarios
       let payload;
