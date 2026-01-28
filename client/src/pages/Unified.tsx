@@ -555,14 +555,6 @@ export default function Unified() {
         const batchIds = data.batchIds || [];
         setScriptDatabaseEntries(scripts);
         setScriptBatchIds(batchIds);
-        if (batchIds.length > 0) {
-          if (!selectedScriptBatchId || !batchIds.includes(selectedScriptBatchId)) {
-            setSelectedScriptBatchId(batchIds[0]);
-          }
-        } else {
-          setSelectedScriptBatchId('');
-        }
-        setSelectedScriptIds(new Set());
       } else {
         setScriptDatabaseEntries([]);
         setScriptBatchIds([]);
@@ -1412,13 +1404,13 @@ export default function Unified() {
                     </div>
                   ) : scriptBatchIds.length > 0 ? (
                     <Select value={selectedScriptBatchId} onValueChange={(value) => {
-                      setSelectedScriptBatchId(value);
-                      setSelectedScriptIds(new Set());
+                      setSelectedScriptBatchId(value === 'all' ? '' : value);
                     }}>
                       <SelectTrigger id="batch-id-selector">
-                        <SelectValue placeholder="Select a Script Batch" />
+                        <SelectValue placeholder="All Batches (no filter)" />
                       </SelectTrigger>
                       <SelectContent className="max-h-60 overflow-y-auto">
+                        <SelectItem value="all">All Batches (no filter)</SelectItem>
                         {scriptBatchIds.map((batchId) => (
                           <SelectItem key={batchId} value={batchId}>
                             {batchId}
@@ -1433,32 +1425,46 @@ export default function Unified() {
                   )}
                 </div>
 
-                {/* Script Selection (filtered by batch) */}
-                {selectedScriptBatchId && (
+                {/* Script Selection (optionally filtered by batch) */}
+                {scriptDatabaseEntries.length > 0 && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <Label>Select Scripts</Label>
+                      <Label>Select Scripts {selectedScriptBatchId && `(${selectedScriptBatchId})`}</Label>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          const batchScripts = scriptDatabaseEntries.filter(s => s.scriptBatchId === selectedScriptBatchId);
-                          if (selectedScriptIds.size === batchScripts.length) {
-                            setSelectedScriptIds(new Set());
+                          const visibleScripts = selectedScriptBatchId 
+                            ? scriptDatabaseEntries.filter(s => s.scriptBatchId === selectedScriptBatchId)
+                            : scriptDatabaseEntries;
+                          const visibleScriptIds = visibleScripts.map(s => s.scriptId);
+                          const allVisibleSelected = visibleScriptIds.every(id => selectedScriptIds.has(id));
+                          
+                          if (allVisibleSelected) {
+                            const newSet = new Set(selectedScriptIds);
+                            visibleScriptIds.forEach(id => newSet.delete(id));
+                            setSelectedScriptIds(newSet);
                           } else {
-                            setSelectedScriptIds(new Set(batchScripts.map(s => s.scriptId)));
+                            const newSet = new Set(selectedScriptIds);
+                            visibleScriptIds.forEach(id => newSet.add(id));
+                            setSelectedScriptIds(newSet);
                           }
                         }}
                       >
-                        {selectedScriptIds.size === scriptDatabaseEntries.filter(s => s.scriptBatchId === selectedScriptBatchId).length 
-                          ? 'Deselect All' 
-                          : 'Select All'}
+                        {(() => {
+                          const visibleScripts = selectedScriptBatchId 
+                            ? scriptDatabaseEntries.filter(s => s.scriptBatchId === selectedScriptBatchId)
+                            : scriptDatabaseEntries;
+                          const visibleScriptIds = visibleScripts.map(s => s.scriptId);
+                          const allVisibleSelected = visibleScriptIds.every(id => selectedScriptIds.has(id));
+                          return allVisibleSelected ? 'Deselect All Visible' : 'Select All Visible';
+                        })()}
                       </Button>
                     </div>
                     <Card className="p-4 max-h-60 overflow-y-auto">
                       <div className="space-y-3">
                         {scriptDatabaseEntries
-                          .filter(script => script.scriptBatchId === selectedScriptBatchId)
+                          .filter(script => !selectedScriptBatchId || script.scriptBatchId === selectedScriptBatchId)
                           .map((script) => (
                             <div key={script.scriptId} className="flex items-start space-x-2">
                               <Checkbox
@@ -1479,7 +1485,7 @@ export default function Unified() {
                                   htmlFor={`script-${script.scriptId}`}
                                   className="text-sm font-medium cursor-pointer"
                                 >
-                                  {script.scriptId}
+                                  {script.scriptBatchId} / {script.scriptId}
                                 </Label>
                                 <p className="text-xs text-gray-500 mt-1 line-clamp-2">
                                   {script.scriptCopy.substring(0, 100)}{script.scriptCopy.length > 100 ? '...' : ''}
@@ -1591,7 +1597,7 @@ export default function Unified() {
             </div>
 
             {/* Process Button */}
-            {selectedScriptBatchId && selectedScriptIds.size > 0 && (
+            {selectedScriptIds.size > 0 && (
               <div className="pt-4 border-t">
                 <Button
                   onClick={handleProcessExistingScripts}
