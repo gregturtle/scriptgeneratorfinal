@@ -15,6 +15,11 @@ function log(message: string, source = "express") {
 
 const app = express();
 
+// Health check endpoint - MUST be first for deployment health checks
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // Serve uploaded files statically
 app.use('/uploads', express.static('uploads'));
 app.use(express.json());
