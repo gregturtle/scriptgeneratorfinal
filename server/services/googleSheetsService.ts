@@ -435,8 +435,8 @@ class GoogleSheetsService {
       if (rows.length < 2) return [];
       const headers = rows[0].map((cell) => (cell ?? '').toString());
       const normalizedHeaders = headers.map(normalizeHeader);
-      const baseHeaderIndex = normalizedHeaders.indexOf('baseid');
-      const linkHeaderIndex = normalizedHeaders.indexOf('filelink');
+      const baseHeaderIndex = normalizedHeaders.findIndex(h => h === 'baseid' || h === 'baseids');
+      const linkHeaderIndex = normalizedHeaders.findIndex(h => h === 'filelink' || h === 'filelinks');
       const baseIndex = baseHeaderIndex !== -1 ? baseHeaderIndex : 0;
       const linkIndex = linkHeaderIndex !== -1 ? linkHeaderIndex : 6;
 
@@ -506,8 +506,8 @@ class GoogleSheetsService {
       const headers = headerCells.map((cell: any) => cellText(cell));
       const normalizedHeaders = headers.map(normalizeHeader);
 
-      const baseHeaderIndex = normalizedHeaders.indexOf('baseid');
-      const linkHeaderIndex = normalizedHeaders.indexOf('filelink');
+      const baseHeaderIndex = normalizedHeaders.findIndex(h => h === 'baseid' || h === 'baseids');
+      const linkHeaderIndex = normalizedHeaders.findIndex(h => h === 'filelink' || h === 'filelinks');
       const baseIndex = baseHeaderIndex !== -1 ? baseHeaderIndex : 0;
       const linkIndex = linkHeaderIndex !== -1 ? linkHeaderIndex : 6;
 
