@@ -814,7 +814,7 @@ class GoogleSheetsService {
 
   /**
    * Write asset entries to Asset_Database tab and read back the auto-generated File_Name
-   * Uses append API to ensure reliable row targeting
+   * Finds rows where columns E, H, and L are empty (other columns may have formulas)
    * Writes: Column E (Base_Id), Column H (Script_Id), Column L (Subtitled Y/N)
    * Reads back: Column A (File_Name - formula generated)
    */
@@ -829,50 +829,89 @@ class GoogleSheetsService {
     try {
       const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
       
-      console.log(`Writing ${entries.length} asset entries to Asset_Database using append`);
+      console.log(`Writing ${entries.length} asset entries to Asset_Database`);
 
-      // Build rows for append - columns E through L (8 columns)
-      // E=Base_Id, F=empty, G=empty, H=Script_Id, I=empty, J=empty, K=empty, L=Subtitled
-      const rows = entries.map(entry => [
-        entry.baseId,  // Column E
-        '',            // Column F (formula)
-        '',            // Column G (formula)
-        entry.scriptId, // Column H
-        '',            // Column I (formula)
-        '',            // Column J (formula)
-        '',            // Column K (formula)
-        entry.subtitled ? 'Y' : 'N'  // Column L
-      ]);
-      
-      // Use append API with INSERT_ROWS to get exact row range back
-      const appendResponse = await this.sheets.spreadsheets.values.append({
+      // Read columns E, H, and L to find rows where all three are empty
+      const dataResponse = await this.sheets.spreadsheets.values.batchGet({
         spreadsheetId: cleanSpreadsheetId,
-        range: `${this.ASSET_DATABASE_TAB_NAME}!E:L`,
-        valueInputOption: 'RAW',
-        insertDataOption: 'INSERT_ROWS',
-        requestBody: { values: rows }
+        ranges: [
+          `${this.ASSET_DATABASE_TAB_NAME}!E:E`,
+          `${this.ASSET_DATABASE_TAB_NAME}!H:H`,
+          `${this.ASSET_DATABASE_TAB_NAME}!L:L`
+        ]
       });
       
-      // Extract the actual row range that was written
-      const updatedRange = appendResponse.data.updates?.updatedRange || '';
-      console.log(`Appended ${entries.length} entries to Asset_Database. Updated range: ${updatedRange}`);
+      const colE = dataResponse.data.valueRanges?.[0]?.values || [];
+      const colH = dataResponse.data.valueRanges?.[1]?.values || [];
+      const colL = dataResponse.data.valueRanges?.[2]?.values || [];
       
-      // Parse the row numbers from the updated range (e.g., "Asset_Database!E5:L7" -> rows 5-7)
-      const rangeMatch = updatedRange.match(/!E(\d+):L(\d+)/);
-      if (!rangeMatch) {
-        console.error('Could not parse updated range:', updatedRange);
-        throw new Error('Failed to determine written row range');
+      // Find first row where E, H, and L are all empty (skip header row 1)
+      const maxRows = Math.max(colE.length, colH.length, colL.length, 1);
+      let startRow = -1;
+      
+      for (let row = 1; row <= maxRows + entries.length; row++) {
+        // Check if this row has E, H, and L all empty
+        const eVal = colE[row]?.[0]?.toString().trim() || '';
+        const hVal = colH[row]?.[0]?.toString().trim() || '';
+        const lVal = colL[row]?.[0]?.toString().trim() || '';
+        
+        if (eVal === '' && hVal === '' && lVal === '') {
+          startRow = row + 1; // Convert to 1-indexed row number
+          break;
+        }
       }
       
-      const startRow = parseInt(rangeMatch[1]);
-      const endRow = parseInt(rangeMatch[2]);
+      // If no empty row found in existing data, start after the last row
+      if (startRow === -1) {
+        startRow = maxRows + 1;
+      }
       
-      console.log(`Written to rows ${startRow} to ${endRow}`);
+      console.log(`Found first empty row at ${startRow}, writing ${entries.length} entries`);
+
+      // Build batch update data for each entry
+      const batchData: Array<{range: string; values: any[][]}> = [];
+      const writtenRows: number[] = [];
+      
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const rowNum = startRow + i;
+        writtenRows.push(rowNum);
+        
+        // Add Base_Id to column E
+        batchData.push({
+          range: `${this.ASSET_DATABASE_TAB_NAME}!E${rowNum}`,
+          values: [[entry.baseId]]
+        });
+        
+        // Add Script_Id to column H
+        batchData.push({
+          range: `${this.ASSET_DATABASE_TAB_NAME}!H${rowNum}`,
+          values: [[entry.scriptId]]
+        });
+        
+        // Add Subtitled (Y/N) to column L
+        batchData.push({
+          range: `${this.ASSET_DATABASE_TAB_NAME}!L${rowNum}`,
+          values: [[entry.subtitled ? 'Y' : 'N']]
+        });
+      }
+      
+      // Execute batch update
+      await this.sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: cleanSpreadsheetId,
+        requestBody: {
+          valueInputOption: 'RAW',
+          data: batchData
+        }
+      });
+      
+      console.log(`Wrote entries to rows ${writtenRows.join(', ')}`);
       
       // Wait for formulas to recalculate
       await new Promise(resolve => setTimeout(resolve, 2000));
       
       // Poll for File_Names with retry logic from the exact written rows
+      const endRow = startRow + entries.length - 1;
       let fileNames: any[][] = [];
       let attempts = 0;
       const maxAttempts = 3;
