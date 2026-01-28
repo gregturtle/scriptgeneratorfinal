@@ -143,6 +143,11 @@ async function validateBatchIntegrity(batchId: string) {
 
 export async function registerRoutes(app: express.Express): Promise<Server> {
   
+  // Health check endpoint for deployment
+  app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+  
   // AI Script Generation endpoints - MUST be first to avoid static file conflicts
   // ElevenLabs voices endpoint
   app.get('/api/elevenlabs/voices', async (req, res) => {
