@@ -492,8 +492,7 @@ class VideoService {
       if (googleDriveService.isConfigured()) {
         console.log('Google Drive service is configured, creating timestamped subfolder...');
         batchFolderId = await googleDriveService.createTimestampedSubfolder(
-          '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh',
-          batchTimestamp
+          '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh'
         );
         batchFolderLink = `https://drive.google.com/drive/folders/${batchFolderId}`;
         console.log(`Created batch folder for ${suggestions.length} videos: ${batchFolderLink} (ID: ${batchFolderId})`);

@@ -39,7 +39,7 @@ export default function Unified() {
   const [scriptCount, setScriptCount] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<ScriptResult | null>(null);
-  const [baseDatabaseEntries, setBaseDatabaseEntries] = useState<{ baseId: string; fileLink: string }[]>([]);
+  const [baseDatabaseEntries, setBaseDatabaseEntries] = useState<{ baseId: string; baseTitle?: string; fileLink: string }[]>([]);
   const [selectedBaseId, setSelectedBaseId] = useState('');
   const [isLoadingBaseDatabase, setIsLoadingBaseDatabase] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState<string>('I8vyadnJFaMFR0zgn147'); // Default to Hybrid Voice 1
@@ -304,6 +304,7 @@ export default function Unified() {
           language: selectedLanguage,
           baseVideo: {
             baseId: selectedBase.baseId,
+            baseTitle: selectedBase.baseTitle,
             fileLink: selectedBase.fileLink
           },
           sendToSlack: slackEnabled,

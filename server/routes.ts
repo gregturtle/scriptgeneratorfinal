@@ -1723,7 +1723,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         
         // Upload videos to Google Drive first
         const parentFolderId = '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh'; // AI Generated Videos folder
-        const driveFolderId = await googleDriveService.createTimestampedSubfolder(parentFolderId);
+        const baseTitle = baseVideo?.baseTitle;
+        const driveFolderId = await googleDriveService.createTimestampedSubfolder(parentFolderId, baseTitle);
         const driveFolderLink = `https://drive.google.com/drive/folders/${driveFolderId}`;
         const driveFolder = { id: driveFolderId, webViewLink: driveFolderLink };
         

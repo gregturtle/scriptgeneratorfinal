@@ -444,16 +444,24 @@ class GoogleDriveService {
 
   /**
    * Create a timestamped subfolder within a parent folder
+   * @param parentFolderId - The parent folder ID
+   * @param baseTitle - Optional base title to include in folder name (e.g., "AerialStreetView")
    */
-  async createTimestampedSubfolder(parentFolderId: string, timestamp?: string): Promise<string> {
+  async createTimestampedSubfolder(parentFolderId: string, baseTitle?: string): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error('Google Drive service not configured');
     }
 
     try {
-      // Generate timestamp if not provided
-      const folderTimestamp = timestamp || new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').substring(0, 19);
-      const folderName = `Generated_${folderTimestamp}`;
+      // Generate date in yy-mm-dd format
+      const now = new Date();
+      const yy = String(now.getFullYear()).slice(-2);
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const dateStr = `${yy}-${mm}-${dd}`;
+      
+      // Format: yy-mm-dd_BaseTitle or just yy-mm-dd if no title
+      const folderName = baseTitle ? `${dateStr}_${baseTitle}` : dateStr;
 
       console.log(`Creating timestamped subfolder: ${folderName} in parent folder ${parentFolderId}`);
 
@@ -483,7 +491,7 @@ class GoogleDriveService {
   /**
    * Upload video to a timestamped subfolder within the main folder
    */
-  async uploadVideoToTimestampedFolder(filePath: string, fileName: string, parentFolderId: string, timestamp?: string): Promise<{ id: string; webViewLink: string; folderId: string; folderLink: string }> {
+  async uploadVideoToTimestampedFolder(filePath: string, fileName: string, parentFolderId: string, baseTitle?: string): Promise<{ id: string; webViewLink: string; folderId: string; folderLink: string }> {
     if (!this.isConfigured()) {
       throw new Error('Google Drive service not configured');
     }
@@ -493,8 +501,8 @@ class GoogleDriveService {
     }
 
     try {
-      // Create timestamped subfolder
-      const subFolderId = await this.createTimestampedSubfolder(parentFolderId, timestamp);
+      // Create timestamped subfolder with baseTitle
+      const subFolderId = await this.createTimestampedSubfolder(parentFolderId, baseTitle);
       
       console.log(`Uploading ${fileName} to timestamped Google Drive subfolder ${subFolderId}`);
 
