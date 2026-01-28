@@ -1435,32 +1435,18 @@ export default function Unified() {
                     Loading Base_IDs...
                   </div>
                 ) : baseDatabaseEntries.length > 0 ? (
-                  <div className="space-y-2">
-                    <Select value={selectedBaseId} onValueChange={setSelectedBaseId}>
-                      <SelectTrigger id="base-id-selector">
-                        <SelectValue placeholder="Select a Base_ID" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-60 overflow-y-auto">
-                        {baseDatabaseEntries.map((entry) => (
-                          <SelectItem key={entry.baseId} value={entry.baseId}>
-                            {entry.baseId}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <select
-                      value={selectedBaseId}
-                      onChange={(e) => setSelectedBaseId(e.target.value)}
-                      className="w-full p-2 border rounded-md bg-white text-sm"
-                    >
-                      <option value="">Select Base_ID...</option>
+                  <Select value={selectedBaseId} onValueChange={setSelectedBaseId}>
+                    <SelectTrigger id="base-id-selector">
+                      <SelectValue placeholder="Select a Base_ID" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60 overflow-y-auto">
                       {baseDatabaseEntries.map((entry) => (
-                        <option key={entry.baseId} value={entry.baseId}>
+                        <SelectItem key={entry.baseId} value={entry.baseId}>
                           {entry.baseId}
-                        </option>
+                        </SelectItem>
                       ))}
-                    </select>
-                  </div>
+                    </SelectContent>
+                  </Select>
                 ) : (
                   <div className="text-sm text-amber-700 bg-amber-100 p-3 rounded-md border border-amber-300">
                     No Base_IDs found in Base_Database (requires Base_Id in column A and file_link in column G).
