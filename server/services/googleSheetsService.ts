@@ -810,6 +810,51 @@ class GoogleSheetsService {
     }
   }
 
+  /**
+   * Update the status of a script in Script_Database by script_id
+   * Searches column B for the script_id and updates column G with the new status
+   */
+  async updateScriptStatus(scriptId: string, status: 'approved' | 'rejected' | 'pending'): Promise<boolean> {
+    try {
+      const scriptDatabaseSheetId = '1elJajodJA1zfzhdlPklw7iTiTaWD11Ij';
+      
+      const response = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: scriptDatabaseSheetId,
+        range: `${this.SCRIPT_DATABASE_TAB_NAME}!A:G`,
+      });
+
+      const rows = response.data.values || [];
+      let rowIndex = -1;
+
+      for (let i = 1; i < rows.length; i++) {
+        if (rows[i][1] === scriptId) {
+          rowIndex = i + 1;
+          break;
+        }
+      }
+
+      if (rowIndex === -1) {
+        console.error(`Script ${scriptId} not found in Script_Database`);
+        return false;
+      }
+
+      await this.sheets.spreadsheets.values.update({
+        spreadsheetId: scriptDatabaseSheetId,
+        range: `${this.SCRIPT_DATABASE_TAB_NAME}!G${rowIndex}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: {
+          values: [[status]]
+        }
+      });
+
+      console.log(`Updated script ${scriptId} status to ${status} in row ${rowIndex}`);
+      return true;
+    } catch (error) {
+      console.error('Error updating script status:', error);
+      return false;
+    }
+  }
+
   private readonly ASSET_DATABASE_TAB_NAME = 'Asset_Database';
 
   /**

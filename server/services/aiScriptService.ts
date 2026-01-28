@@ -345,14 +345,22 @@ Respond in JSON format:
       }
 
       // Record scripts to Script_Database tab in the same spreadsheet
+      let scriptDatabaseInfo: { batchId: string; scriptIds: string[] } | null = null;
       try {
         const scriptsToRecord = suggestions.map(s => ({
           language: language,
           scriptCopy: s.nativeContent || s.content,
           aiModel: s.llmModel || llmProvider
         }));
-        await googleSheetsService.recordScriptsToDatabase(spreadsheetId, scriptsToRecord);
+        scriptDatabaseInfo = await googleSheetsService.recordScriptsToDatabase(spreadsheetId, scriptsToRecord);
         console.log('Scripts recorded to Script_Database tab');
+        
+        // Attach script IDs to suggestions for reference
+        if (scriptDatabaseInfo) {
+          suggestions.forEach((s, i) => {
+            (s as any).scriptId = scriptDatabaseInfo!.scriptIds[i];
+          });
+        }
       } catch (dbError) {
         console.error('Error recording to Script_Database (continuing):', dbError);
       }
@@ -360,7 +368,8 @@ Respond in JSON format:
       return {
         suggestions,
         message: 'Successfully generated script suggestions using Guidance Primer',
-        voiceGenerated
+        voiceGenerated,
+        scriptDatabaseInfo
       };
     } catch (error) {
       console.error("Error generating script suggestions:", error);

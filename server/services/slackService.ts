@@ -15,6 +15,9 @@ const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 // In-memory tracking for button decisions
 const batchDecisions = new Map<string, Map<string, { approved: boolean; messageTs: string; videoFileId: string }>>();
 
+// In-memory tracking for script-only approval decisions
+const scriptBatchDecisions = new Map<string, Map<string, { approved: boolean; messageTs: string; scriptId: string }>>();
+
 
 
 export class SlackService {
@@ -519,6 +522,262 @@ export class SlackService {
       await this.sendMessage(summaryMessage);
     } catch (error) {
       console.error('Error sending batch completion summary:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Sends a script batch for approval to Slack (scripts only, no videos)
+   */
+  async sendScriptBatchForApproval(
+    batchInfo: {
+      batchId: string;
+      scriptCount: number;
+      scripts: Array<{
+        scriptId: string;
+        content: string;
+        nativeContent?: string;
+        language?: string;
+        notableAdjustments?: string;
+      }>;
+      timestamp: string;
+    }
+  ): Promise<string | undefined> {
+    try {
+      // Send batch header message
+      const headerMessage: ChatPostMessageArguments = {
+        channel: process.env.SLACK_CHANNEL_ID!,
+        text: `New script batch for review: ${batchInfo.batchId}`,
+        blocks: [
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
+              text: `SCRIPT BATCH: ${batchInfo.batchId.toUpperCase()}`
+            }
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `Script Review Summary\n${batchInfo.scriptCount} scripts generated\nGenerated: ${batchInfo.timestamp}`
+            }
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `REVIEW REQUIRED\n\nPlease review each script below and click APPROVE or REJECT.\nApproved scripts will be marked as ready for use.\nRejected scripts will be marked accordingly.`
+            }
+          },
+          {
+            type: 'divider'
+          }
+        ]
+      };
+
+      await this.sendMessage(headerMessage);
+
+      // Track script IDs for batch monitoring
+      const scriptIds: string[] = [];
+
+      // Send individual messages for each script with buttons
+      for (let i = 0; i < batchInfo.scripts.length; i++) {
+        const script = batchInfo.scripts[i];
+        const scriptNumber = i + 1;
+
+        scriptIds.push(script.scriptId);
+
+        let scriptText = `SCRIPT ${scriptNumber}: ${script.scriptId}\n`;
+
+        // Show both native and English versions if available
+        if (script.nativeContent && script.language && script.language !== 'en') {
+          const languageNames: { [key: string]: string } = {
+            'de': 'German', 'hi': 'Hindi', 'kn': 'Kannada', 'es': 'Spanish',
+            'fr': 'French', 'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian',
+            'zh': 'Chinese', 'ja': 'Japanese', 'ko': 'Korean', 'ar': 'Arabic'
+          };
+          const languageName = languageNames[script.language] || script.language.toUpperCase();
+
+          scriptText += `${languageName} Script: "${script.nativeContent}"\n`;
+          scriptText += `English Translation: "${script.content}"\n`;
+
+          if (script.notableAdjustments) {
+            scriptText += `Translation Notes: ${script.notableAdjustments}\n`;
+          }
+        } else {
+          scriptText += `Script: "${script.content}"`;
+        }
+
+        const scriptMessage: ChatPostMessageArguments = {
+          channel: process.env.SLACK_CHANNEL_ID!,
+          text: `Script ${scriptNumber}: ${script.scriptId}`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: scriptText
+              }
+            },
+            {
+              type: 'actions',
+              elements: [
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: 'APPROVE'
+                  },
+                  style: 'primary',
+                  value: `approve_script||${batchInfo.batchId}||${scriptNumber}||${script.scriptId}`,
+                  action_id: `approve_script_${scriptNumber}`
+                },
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: 'REJECT'
+                  },
+                  style: 'danger',
+                  value: `reject_script||${batchInfo.batchId}||${scriptNumber}||${script.scriptId}`,
+                  action_id: `reject_script_${scriptNumber}`
+                }
+              ]
+            }
+          ]
+        };
+
+        await this.sendMessage(scriptMessage);
+      }
+
+      // Initialize decision tracking for this script batch
+      scriptBatchDecisions.set(batchInfo.batchId, new Map());
+
+      // Start monitoring the script batch for completion
+      this.monitorScriptBatchCompletion(batchInfo.batchId, batchInfo.scripts.length, scriptIds);
+
+      return 'script-batch-sent';
+    } catch (error) {
+      console.error('Error sending script batch for approval:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Records a script decision from button interaction
+   */
+  async recordScriptDecision(
+    batchId: string,
+    scriptNumber: string,
+    scriptId: string,
+    approved: boolean,
+    messageTs: string
+  ): Promise<void> {
+    let batch = scriptBatchDecisions.get(batchId);
+    if (!batch) {
+      console.log(`[SCRIPT DECISION] Creating new batch tracking for ${batchId}`);
+      scriptBatchDecisions.set(batchId, new Map());
+      batch = scriptBatchDecisions.get(batchId);
+    }
+
+    if (batch) {
+      batch.set(scriptNumber, { approved, messageTs, scriptId });
+      console.log(`[SCRIPT DECISION] Batch: ${batchId}, Script: ${scriptNumber}, Decision: ${approved ? 'APPROVED' : 'REJECTED'}`);
+      console.log(`[SCRIPT DECISION] Current batch size: ${batch.size}`);
+    }
+  }
+
+  /**
+   * Monitors script batch completion using button decisions
+   */
+  async monitorScriptBatchCompletion(
+    batchId: string,
+    totalScripts: number,
+    scriptIds: string[]
+  ): Promise<void> {
+    let attempts = 0;
+    const maxAttempts = 120; // 60 minutes max monitoring
+
+    const checkCompletion = async () => {
+      attempts++;
+      console.log(`[SCRIPT MONITOR] Monitoring attempt ${attempts}/${maxAttempts} for ${batchId}`);
+
+      const batchDecisionMap = scriptBatchDecisions.get(batchId);
+      if (!batchDecisionMap) {
+        console.log(`[SCRIPT MONITOR] No decisions found for batch ${batchId}`);
+        if (attempts < maxAttempts) {
+          setTimeout(checkCompletion, 30000);
+        }
+        return;
+      }
+
+      const reviewedCount = batchDecisionMap.size;
+      const approvedCount = Array.from(batchDecisionMap.values()).filter(d => d.approved).length;
+      const rejectedCount = reviewedCount - approvedCount;
+
+      console.log(`[SCRIPT MONITOR] Batch status - Reviewed: ${reviewedCount}/${totalScripts}, Approved: ${approvedCount}, Rejected: ${rejectedCount}`);
+
+      if (reviewedCount >= totalScripts) {
+        console.log(`[SCRIPT MONITOR] Sending completion summary for ${batchId}`);
+        await this.sendScriptBatchCompletionSummary(batchId, totalScripts, approvedCount, rejectedCount);
+
+        // Clean up tracking for this batch
+        scriptBatchDecisions.delete(batchId);
+        console.log(`[SCRIPT MONITOR] Script batch ${batchId} processing complete`);
+
+      } else if (attempts < maxAttempts) {
+        setTimeout(checkCompletion, 30000);
+      } else {
+        console.log(`[SCRIPT MONITOR] Timeout reached for batch ${batchId} - stopping monitoring`);
+      }
+    };
+
+    // Start monitoring immediately
+    checkCompletion();
+  }
+
+  /**
+   * Sends script batch completion summary to Slack
+   */
+  async sendScriptBatchCompletionSummary(
+    batchId: string,
+    totalScripts: number,
+    approvedCount: number,
+    rejectedCount: number
+  ): Promise<void> {
+    try {
+      const summaryMessage: ChatPostMessageArguments = {
+        channel: process.env.SLACK_CHANNEL_ID!,
+        text: `Script batch ${batchId} review complete`,
+        blocks: [
+          {
+            type: 'header',
+            text: {
+              type: 'plain_text',
+              text: `SCRIPT REVIEW COMPLETE: ${batchId.toUpperCase()}`
+            }
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `Final Results\nTotal Scripts: ${totalScripts}\nApproved: ${approvedCount}\nRejected: ${rejectedCount}\nApproval Rate: ${Math.round((approvedCount / totalScripts) * 100)}%`
+            }
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `Review Complete\n\nApproved scripts are ready for asset creation. Script statuses have been updated in the Script Database.`
+            }
+          }
+        ]
+      };
+
+      await this.sendMessage(summaryMessage);
+    } catch (error) {
+      console.error('Error sending script batch completion summary:', error);
       throw error;
     }
   }

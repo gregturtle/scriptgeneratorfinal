@@ -442,6 +442,40 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           console.error('Failed to send Slack notifications:', slackError);
           // Continue without failing the entire request
         }
+      } else if (!hasVideosForSlack && !slackDisabled && result.scriptDatabaseInfo) {
+        // Script-only Slack approval workflow (no videos)
+        try {
+          const timestamp = new Date().toLocaleString('en-CA', { 
+            timeZone: 'UTC',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          }).replace(',', '');
+
+          const scriptBatchData = {
+            batchId: result.scriptDatabaseInfo.batchId,
+            scriptCount: result.suggestions.length,
+            scripts: result.suggestions.map((s: any, index: number) => ({
+              scriptId: result.scriptDatabaseInfo!.scriptIds[index],
+              content: s.content,
+              nativeContent: s.nativeContent,
+              language: s.language
+            })),
+            timestamp
+          };
+
+          console.log(`Sending script batch ${scriptBatchData.batchId} to Slack for approval`);
+          await slackService.sendScriptBatchForApproval(scriptBatchData);
+          console.log(`Sent script batch to Slack for approval: ${scriptBatchData.batchId}`);
+          slackScheduled = true;
+        } catch (slackError) {
+          console.error('Failed to send script Slack notifications:', slackError);
+          // Continue without failing the entire request
+        }
       }
 
       const hasVideos = result.suggestions.some(s => s.videoUrl);
@@ -743,20 +777,23 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         const channel = payload.channel;
         const messageTs = payload.message.ts;
         
-        // Parse action value: approve||${batchInfo.batchName}||${scriptNumber}||${script.videoFileId}
-        const [actionType, batchName, scriptNumber, videoFileId] = action.value.split('||');
+        // Parse action value: actionType||batchName||scriptNumber||fileId
+        const [actionType, batchName, scriptNumber, fileId] = action.value.split('||');
         
-        console.log(`[SLACK INTERACTION] User ${user.name} clicked ${actionType.toUpperCase()} for script ${scriptNumber} in batch ${batchName}`);
+        // Check if this is a script-only approval (no video)
+        const isScriptOnlyApproval = actionType === 'approve_script' || actionType === 'reject_script';
+        const isApproved = actionType === 'approve' || actionType === 'approve_script';
+        
+        console.log(`[SLACK INTERACTION] User ${user.name} clicked ${actionType.toUpperCase()} for ${isScriptOnlyApproval ? 'script' : 'ad'} ${scriptNumber} in batch ${batchName}`);
         
         // Update the message to show the decision
-        const isApproved = actionType === 'approve';
-        const statusText = isApproved ? '✅ APPROVED' : '❌ REJECTED';
+        const statusText = isApproved ? 'APPROVED' : 'REJECTED';
         const statusEmoji = isApproved ? '✅' : '❌';
         
         // CRITICAL: Respond to Slack immediately (within 3 seconds) to avoid 502 timeout
         res.json({
           response_type: 'in_channel',
-          text: `${statusEmoji} Decision recorded for Ad ${scriptNumber}`
+          text: `${statusEmoji} Decision recorded for ${isScriptOnlyApproval ? 'Script' : 'Ad'} ${scriptNumber}`
         });
         
         // Process the decision asynchronously in the background (don't await)
@@ -767,14 +804,28 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
               channel.id,
               messageTs,
               payload.message.blocks[0].text.text, // Keep original text
-              statusText,
+              `${statusEmoji} ${statusText}`,
               user.name
             );
             
-            // Record the decision for batch monitoring
-            await slackService.recordDecision(batchName, scriptNumber, videoFileId, isApproved, messageTs);
+            if (isScriptOnlyApproval) {
+              // Record decision for script-only batch monitoring
+              await slackService.recordScriptDecision(batchName, scriptNumber, fileId, isApproved, messageTs);
+              
+              // Update script status in Google Sheets Script_Database
+              try {
+                const status = isApproved ? 'approved' : 'rejected';
+                await googleSheetsService.updateScriptStatus(fileId, status);
+                console.log(`[SLACK INTERACTION] Updated script ${fileId} status to ${status} in Script_Database`);
+              } catch (sheetsError) {
+                console.error(`[SLACK INTERACTION] Error updating script status in sheets:`, sheetsError);
+              }
+            } else {
+              // Record decision for video batch monitoring
+              await slackService.recordDecision(batchName, scriptNumber, fileId, isApproved, messageTs);
+            }
             
-            console.log(`[SLACK INTERACTION] Successfully processed ${actionType} for script ${scriptNumber}`);
+            console.log(`[SLACK INTERACTION] Successfully processed ${actionType} for ${isScriptOnlyApproval ? 'script' : 'ad'} ${scriptNumber}`);
           } catch (error) {
             console.error(`[SLACK INTERACTION] Error processing decision:`, error);
           }
