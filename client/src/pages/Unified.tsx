@@ -50,6 +50,7 @@ export default function Unified() {
   const [experimentalPercentage, setExperimentalPercentage] = useState(40);
   const [individualGeneration, setIndividualGeneration] = useState(true);
   const [slackEnabled, setSlackEnabled] = useState(false);
+  const [slackEnabledGenerate, setSlackEnabledGenerate] = useState(false);
   const [llmProvider, setLlmProvider] = useState<'openai' | 'groq' | 'gemini'>('openai');
   const [availableLlmProviders, setAvailableLlmProviders] = useState<{id: string, name: string, available: boolean}[]>([]);
   
@@ -596,7 +597,7 @@ export default function Unified() {
         language: selectedLanguage,
         experimentalPercentage: experimentalPercentage,
         individualGeneration: individualGeneration,
-        slackEnabled: false,
+        slackEnabled: slackEnabledGenerate,
         llmProvider: llmProvider
       };
 
@@ -1272,6 +1273,21 @@ export default function Unified() {
               </p>
             </div>
           )}
+
+          {/* Slack Toggle */}
+          <div className="flex items-center justify-between border-t pt-4">
+            <div className="space-y-1">
+              <Label htmlFor="slack-toggle-generate">Send to Slack for Approval</Label>
+              <p className="text-xs text-gray-500">
+                Scripts will be sent to Slack for team review before use
+              </p>
+            </div>
+            <Switch
+              id="slack-toggle-generate"
+              checked={slackEnabledGenerate}
+              onCheckedChange={setSlackEnabledGenerate}
+            />
+          </div>
 
           {/* Generate Button */}
           <Button 
