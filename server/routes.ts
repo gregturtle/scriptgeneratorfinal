@@ -1576,36 +1576,64 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       
       if (baseVideo && baseVideo.fileLink) {
         const fileId = googleDriveService.extractFileIdFromLink(baseVideo.fileLink);
-        if (!fileId) {
+        const folderId = fileId ? null : googleDriveService.extractFolderIdFromLink(baseVideo.fileLink);
+
+        if (fileId) {
+          const fileInfo = await googleDriveService.getFileInfo(fileId);
+          if (!fileInfo || !fileInfo.name) {
+            return res.status(400).json({
+              error: 'Base film not found',
+              details: 'Could not find the selected Base_ID file in Google Drive. Please choose another Base_ID.'
+            });
+          }
+
+          if (fileInfo.mimeType && !fileInfo.mimeType.startsWith('video/')) {
+            return res.status(400).json({
+              error: 'Invalid base film',
+              details: 'Selected Base_ID link does not point to a video file. Please choose another Base_ID.'
+            });
+          }
+
+          console.log(`Downloading base film from Drive: ${fileInfo.name} (${fileId})`);
+          const downloadResult = await googleDriveService.downloadBaseFilmToTemp(fileId, fileInfo.name);
+          if (downloadResult.success && downloadResult.filePath) {
+            videosToUse.push(downloadResult.filePath);
+          } else {
+            return res.status(400).json({
+              error: 'Failed to download base film',
+              details: downloadResult.error || 'Failed to download base film from Google Drive. Please choose another Base_ID.'
+            });
+          }
+        } else if (folderId) {
+          const folderVideos = await googleDriveService.listBaseFilms(folderId);
+          if (folderVideos.length === 0) {
+            return res.status(400).json({
+              error: 'No videos found',
+              details: 'Selected Base_ID points to a folder with no video files. Please choose another Base_ID.'
+            });
+          }
+          if (folderVideos.length > 1) {
+            return res.status(400).json({
+              error: 'Multiple videos found',
+              details: `Selected Base_ID folder contains ${folderVideos.length} videos. Please provide a direct file link or ensure the folder has a single video.`
+            });
+          }
+
+          const [video] = folderVideos;
+          console.log(`Downloading base film from folder: ${video.name} (${video.id})`);
+          const downloadResult = await googleDriveService.downloadBaseFilmToTemp(video.id, video.name);
+          if (downloadResult.success && downloadResult.filePath) {
+            videosToUse.push(downloadResult.filePath);
+          } else {
+            return res.status(400).json({
+              error: 'Failed to download base film',
+              details: downloadResult.error || 'Failed to download base film from Google Drive. Please choose another Base_ID.'
+            });
+          }
+        } else {
           return res.status(400).json({
             error: 'Invalid base film link',
             details: 'Selected Base_ID has an invalid Google Drive link. Please choose another Base_ID.'
-          });
-        }
-
-        const fileInfo = await googleDriveService.getFileInfo(fileId);
-        if (!fileInfo || !fileInfo.name) {
-          return res.status(400).json({
-            error: 'Base film not found',
-            details: 'Could not find the selected Base_ID file in Google Drive. Please choose another Base_ID.'
-          });
-        }
-
-        if (fileInfo.mimeType && !fileInfo.mimeType.startsWith('video/')) {
-          return res.status(400).json({
-            error: 'Invalid base film',
-            details: 'Selected Base_ID link does not point to a video file. Please choose another Base_ID.'
-          });
-        }
-
-        console.log(`Downloading base film from Drive: ${fileInfo.name} (${fileId})`);
-        const downloadResult = await googleDriveService.downloadBaseFilmToTemp(fileId, fileInfo.name);
-        if (downloadResult.success && downloadResult.filePath) {
-          videosToUse.push(downloadResult.filePath);
-        } else {
-          return res.status(400).json({
-            error: 'Failed to download base film',
-            details: downloadResult.error || 'Failed to download base film from Google Drive. Please choose another Base_ID.'
           });
         }
       } else if (backgroundVideosDrive && backgroundVideosDrive.length > 0) {

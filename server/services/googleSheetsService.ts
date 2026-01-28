@@ -397,25 +397,72 @@ class GoogleSheetsService {
    * Base_Id is in column A, file_link is in column G
    */
   async readBaseDatabase(spreadsheetId: string): Promise<{ baseId: string; fileLink: string }[]> {
-    try {
-      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
+    const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
 
-      const response = await this.sheets.spreadsheets.values.get({
+    const normalizeHeader = (value: string) =>
+      value.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+
+    const extractUrlFromFormula = (formula: string): string | null => {
+      const match = formula.match(/HYPERLINK\(\s*\"([^\"]+)\"/i);
+      return match?.[1] || null;
+    };
+
+    const cellText = (cell: any): string => {
+      if (!cell) return '';
+      if (typeof cell.formattedValue === 'string') return cell.formattedValue;
+      const effective = cell.effectiveValue;
+      if (effective?.stringValue) return effective.stringValue;
+      if (effective?.numberValue !== undefined) return effective.numberValue.toString();
+      const entered = cell.userEnteredValue;
+      if (entered?.stringValue) return entered.stringValue;
+      if (entered?.numberValue !== undefined) return entered.numberValue.toString();
+      if (entered?.formulaValue) return entered.formulaValue;
+      return '';
+    };
+
+    const cellLink = (cell: any): string => {
+      if (!cell) return '';
+      if (cell.hyperlink) return cell.hyperlink;
+      const formula = cell.userEnteredValue?.formulaValue || cell.effectiveValue?.formulaValue;
+      if (typeof formula === 'string') {
+        const extracted = extractUrlFromFormula(formula);
+        if (extracted) return extracted;
+      }
+      return cellText(cell);
+    };
+
+    try {
+      const response = await this.sheets.spreadsheets.get({
         spreadsheetId: cleanSpreadsheetId,
-        range: 'Base_Database!A:G',
+        ranges: ['Base_Database!A:Z'],
+        includeGridData: true,
       });
 
-      const rows = response.data.values || [];
-      if (rows.length < 2) {
+      const baseSheet =
+        response.data.sheets?.find((sheet: any) => sheet.properties?.title === 'Base_Database') ||
+        response.data.sheets?.[0];
+      const rowData = baseSheet?.data?.[0]?.rowData || [];
+      if (rowData.length < 2) {
         return [];
       }
 
-      const dataRows = rows.slice(1);
-      return dataRows
-        .map((row) => ({
-          baseId: (row[0] || '').toString().trim(),
-          fileLink: (row[6] || '').toString().trim(),
-        }))
+      const headerCells = rowData[0]?.values || [];
+      const headers = headerCells.map((cell: any) => cellText(cell));
+      const normalizedHeaders = headers.map(normalizeHeader);
+
+      const baseHeaderIndex = normalizedHeaders.indexOf('baseid');
+      const linkHeaderIndex = normalizedHeaders.indexOf('filelink');
+      const baseIndex = baseHeaderIndex !== -1 ? baseHeaderIndex : 0;
+      const linkIndex = linkHeaderIndex !== -1 ? linkHeaderIndex : 6;
+
+      return rowData
+        .slice(1)
+        .map((row: any) => {
+          const cells = row?.values || [];
+          const baseId = cellText(cells[baseIndex]).toString().trim();
+          const fileLink = cellLink(cells[linkIndex]).toString().trim();
+          return { baseId, fileLink };
+        })
         .filter(entry => entry.baseId && entry.fileLink);
     } catch (error) {
       console.error('Error reading base database from tab:', error);

@@ -433,6 +433,16 @@ class GoogleDriveService {
   }
 
   /**
+   * Extract a Google Drive folder ID from a share link
+   */
+  extractFolderIdFromLink(input: string): string | null {
+    if (!input) return null;
+    const trimmed = input.trim();
+    const match = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    return match?.[1] || null;
+  }
+
+  /**
    * Create a timestamped subfolder within a parent folder
    */
   async createTimestampedSubfolder(parentFolderId: string, timestamp?: string): Promise<string> {
