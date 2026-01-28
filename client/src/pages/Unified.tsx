@@ -54,7 +54,7 @@ export default function Unified() {
   const [availableLlmProviders, setAvailableLlmProviders] = useState<{id: string, name: string, available: boolean}[]>([]);
   
   // States for processing existing scripts
-  const [activeTab, setActiveTab] = useState<'iterations' | 'generate' | 'process' | 'meta-upload'>('iterations');
+  const [activeTab, setActiveTab] = useState<'iterations' | 'generate' | 'process'>('iterations');
   const [availableTabs, setAvailableTabs] = useState<string[]>([]);
   const [selectedTabs, setSelectedTabs] = useState<string[]>([]);
   const [existingScripts, setExistingScripts] = useState<any[]>([]);
@@ -660,9 +660,9 @@ export default function Unified() {
         </p>
       </div>
 
-      {/* Tabs for Iterations, Generate, Process, and Meta Upload */}
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'iterations' | 'generate' | 'process' | 'meta-upload')}>
-        <TabsList className="grid w-full grid-cols-4 mb-6">
+      {/* Tabs for Iterations, Generate, and Process */}
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'iterations' | 'generate' | 'process')}>
+        <TabsList className="grid w-full grid-cols-3 mb-6">
           <TabsTrigger value="iterations" className="flex items-center gap-2">
             <RefreshCw className="h-4 w-4" />
             Generate Iteration Scripts
@@ -674,10 +674,6 @@ export default function Unified() {
           <TabsTrigger value="process" className="flex items-center gap-2">
             <Video className="h-4 w-4" />
             Asset Creation
-          </TabsTrigger>
-          <TabsTrigger value="meta-upload" className="flex items-center gap-2">
-            <Upload className="h-4 w-4" />
-            Upload to Meta
           </TabsTrigger>
         </TabsList>
 
@@ -1616,268 +1612,6 @@ export default function Unified() {
               </div>
             )}
 
-          </CardContent>
-        </Card>
-      </TabsContent>
-
-      {/* Meta Upload Tab Content */}
-      <TabsContent value="meta-upload" className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Upload className="h-5 w-5" />
-              Upload Creative to Meta
-            </CardTitle>
-            <CardDescription>
-              Bulk upload video ads from Google Drive directly to your Meta Ad Account
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Google Drive Folder URL */}
-            <div className="space-y-2">
-              <Label htmlFor="meta-folder-url">Google Drive Folder URL</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="meta-folder-url"
-                  value={metaFolderUrl}
-                  onChange={(e) => setMetaFolderUrl(e.target.value)}
-                  placeholder="https://drive.google.com/drive/folders/your-folder-id"
-                  className="flex-1"
-                />
-                <Button
-                  onClick={async () => {
-                    if (!metaFolderUrl.trim()) {
-                      toast({
-                        title: "Missing Folder URL",
-                        description: "Please enter a Google Drive folder URL",
-                        variant: "destructive"
-                      });
-                      return;
-                    }
-                    setIsLoadingMetaVideos(true);
-                    setMetaVideos([]);
-                    setSelectedMetaVideos(new Set());
-                    try {
-                      const response = await fetch('/api/drive/list-folder-videos', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ folderUrl: metaFolderUrl.trim() })
-                      });
-                      if (!response.ok) {
-                        const error = await response.json();
-                        throw new Error(error.error || 'Failed to fetch videos');
-                      }
-                      const data = await response.json();
-                      setMetaVideos(data.videos || []);
-                      if (data.videos?.length > 0) {
-                        toast({
-                          title: "Videos Found",
-                          description: `Found ${data.videos.length} video(s) in the folder`
-                        });
-                      } else {
-                        toast({
-                          title: "No Videos Found",
-                          description: "No video files found in this folder",
-                          variant: "destructive"
-                        });
-                      }
-                    } catch (error) {
-                      toast({
-                        title: "Error",
-                        description: error instanceof Error ? error.message : "Failed to load videos",
-                        variant: "destructive"
-                      });
-                    } finally {
-                      setIsLoadingMetaVideos(false);
-                    }
-                  }}
-                  disabled={isLoadingMetaVideos}
-                >
-                  {isLoadingMetaVideos ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    'Load Videos'
-                  )}
-                </Button>
-              </div>
-              <p className="text-xs text-gray-500">
-                Paste the full URL of your Google Drive folder containing video ads
-              </p>
-            </div>
-
-            {/* Video List */}
-            {metaVideos.length > 0 && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Videos in Folder ({metaVideos.length})</Label>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      if (selectedMetaVideos.size === metaVideos.length) {
-                        setSelectedMetaVideos(new Set());
-                      } else {
-                        setSelectedMetaVideos(new Set(metaVideos.map(v => v.id)));
-                      }
-                    }}
-                  >
-                    {selectedMetaVideos.size === metaVideos.length ? 'Deselect All' : 'Select All'}
-                  </Button>
-                </div>
-                <Card className="p-4 max-h-64 overflow-y-auto">
-                  <div className="space-y-2">
-                    {metaVideos.map((video) => (
-                      <div key={video.id} className="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded">
-                        <Checkbox
-                          id={`meta-video-${video.id}`}
-                          checked={selectedMetaVideos.has(video.id)}
-                          onCheckedChange={(checked) => {
-                            const newSet = new Set(selectedMetaVideos);
-                            if (checked) {
-                              newSet.add(video.id);
-                            } else {
-                              newSet.delete(video.id);
-                            }
-                            setSelectedMetaVideos(newSet);
-                          }}
-                        />
-                        <Video className="h-4 w-4 text-blue-600" />
-                        <div className="flex-1">
-                          <span className="text-sm font-medium">{video.name}</span>
-                          {video.size && (
-                            <span className="text-xs text-gray-500 ml-2">({video.size})</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-                <p className="text-xs text-gray-500">
-                  {selectedMetaVideos.size === 0 
-                    ? "Select videos to upload to Meta"
-                    : `${selectedMetaVideos.size} video(s) selected`
-                  }
-                </p>
-              </div>
-            )}
-
-            {/* Upload Progress */}
-            {isUploadingToMeta && metaUploadProgress.total > 0 && (
-              <div className="space-y-2 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                  <span className="text-sm font-medium text-blue-800">
-                    Uploading to Meta: {metaUploadProgress.current} / {metaUploadProgress.total}
-                  </span>
-                </div>
-                {metaUploadProgress.currentVideo && (
-                  <p className="text-xs text-blue-600">
-                    Current: {metaUploadProgress.currentVideo}
-                  </p>
-                )}
-                <div className="w-full bg-blue-200 rounded-full h-2">
-                  <div 
-                    className="bg-blue-600 h-2 rounded-full transition-all"
-                    style={{ width: `${(metaUploadProgress.current / metaUploadProgress.total) * 100}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Upload Button */}
-            {metaVideos.length > 0 && (
-              <Button
-                onClick={async () => {
-                  if (selectedMetaVideos.size === 0) {
-                    toast({
-                      title: "No Videos Selected",
-                      description: "Please select at least one video to upload",
-                      variant: "destructive"
-                    });
-                    return;
-                  }
-                  
-                  setIsUploadingToMeta(true);
-                  setMetaUploadProgress({ current: 0, total: selectedMetaVideos.size });
-                  
-                  try {
-                    const videosToUpload = metaVideos.filter(v => selectedMetaVideos.has(v.id));
-                    let successCount = 0;
-                    let failCount = 0;
-                    
-                    for (let i = 0; i < videosToUpload.length; i++) {
-                      const video = videosToUpload[i];
-                      setMetaUploadProgress({ 
-                        current: i, 
-                        total: videosToUpload.length,
-                        currentVideo: video.name 
-                      });
-                      
-                      try {
-                        const response = await fetch('/api/meta/upload-from-drive', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ 
-                            driveFileId: video.id,
-                            fileName: video.name
-                          })
-                        });
-                        
-                        if (response.ok) {
-                          successCount++;
-                        } else {
-                          failCount++;
-                          console.error(`Failed to upload ${video.name}`);
-                        }
-                      } catch (error) {
-                        failCount++;
-                        console.error(`Error uploading ${video.name}:`, error);
-                      }
-                    }
-                    
-                    setMetaUploadProgress({ 
-                      current: videosToUpload.length, 
-                      total: videosToUpload.length 
-                    });
-                    
-                    toast({
-                      title: "Upload Complete",
-                      description: `Successfully uploaded ${successCount} video(s)${failCount > 0 ? `, ${failCount} failed` : ''} to Meta`,
-                      variant: failCount > 0 ? "destructive" : "default"
-                    });
-                    
-                    // Clear selection after successful upload
-                    if (successCount > 0) {
-                      setSelectedMetaVideos(new Set());
-                    }
-                  } catch (error) {
-                    toast({
-                      title: "Upload Failed",
-                      description: error instanceof Error ? error.message : "Failed to upload videos",
-                      variant: "destructive"
-                    });
-                  } finally {
-                    setIsUploadingToMeta(false);
-                    setMetaUploadProgress({ current: 0, total: 0 });
-                  }
-                }}
-                disabled={isUploadingToMeta || selectedMetaVideos.size === 0}
-                className="w-full"
-                size="lg"
-              >
-                {isUploadingToMeta ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Uploading to Meta...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload {selectedMetaVideos.size > 0 ? `${selectedMetaVideos.size} Video(s)` : 'Videos'} to Meta
-                  </>
-                )}
-              </Button>
-            )}
           </CardContent>
         </Card>
       </TabsContent>
