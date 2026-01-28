@@ -1485,7 +1485,7 @@ export default function Unified() {
                                   htmlFor={`script-${script.scriptId}`}
                                   className="text-sm font-medium cursor-pointer"
                                 >
-                                  {script.scriptBatchId} / {script.scriptId}
+                                  {script.scriptId}_{script.languageId || 'en'}_{script.status || 'pending'}
                                 </Label>
                                 <p className="text-xs text-gray-500 mt-1 line-clamp-2">
                                   {script.scriptCopy.substring(0, 100)}{script.scriptCopy.length > 100 ? '...' : ''}
