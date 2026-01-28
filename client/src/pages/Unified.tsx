@@ -502,11 +502,18 @@ export default function Unified() {
           setSelectedBaseId('');
         }
       } else {
+        let errorDetails = '';
+        try {
+          const errorBody = await response.json();
+          errorDetails = errorBody?.details || errorBody?.error || '';
+        } catch {
+          // ignore JSON parse errors
+        }
         setBaseDatabaseEntries([]);
         setSelectedBaseId('');
         toast({
           title: "Failed to load base database",
-          description: "Could not read Base_Database tab from Google Sheets",
+          description: errorDetails || "Could not read Base_Database tab from Google Sheets",
           variant: "destructive"
         });
       }
@@ -516,7 +523,7 @@ export default function Unified() {
       setSelectedBaseId('');
       toast({
         title: "Error",
-        description: "Failed to load base films from Google Sheets",
+        description: error instanceof Error ? error.message : "Failed to load base films from Google Sheets",
         variant: "destructive"
       });
     } finally {
