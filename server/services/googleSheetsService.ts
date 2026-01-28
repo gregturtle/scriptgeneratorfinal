@@ -431,15 +431,71 @@ class GoogleSheetsService {
       return cellText(cell);
     };
 
+    const parseRows = (rows: any[][], linkResolver: (value: string) => string): { baseId: string; fileLink: string }[] => {
+      if (rows.length < 2) return [];
+      const headers = rows[0].map((cell) => (cell ?? '').toString());
+      const normalizedHeaders = headers.map(normalizeHeader);
+      const baseHeaderIndex = normalizedHeaders.indexOf('baseid');
+      const linkHeaderIndex = normalizedHeaders.indexOf('filelink');
+      const baseIndex = baseHeaderIndex !== -1 ? baseHeaderIndex : 0;
+      const linkIndex = linkHeaderIndex !== -1 ? linkHeaderIndex : 6;
+
+      return rows
+        .slice(1)
+        .map((row) => {
+          const baseId = (row[baseIndex] ?? '').toString().trim();
+          const linkRaw = (row[linkIndex] ?? '').toString().trim();
+          const fileLink = linkResolver(linkRaw).toString().trim();
+          return { baseId, fileLink };
+        })
+        .filter(entry => entry.baseId && entry.fileLink);
+    };
+
     try {
+      const sheetMeta = await this.sheets.spreadsheets.get({
+        spreadsheetId: cleanSpreadsheetId,
+      });
+
+      const normalizedTarget = normalizeHeader('Base_Database');
+      const baseSheetTitle =
+        sheetMeta.data.sheets
+          ?.map((sheet: any) => sheet.properties?.title)
+          .find((title: string | undefined) => title && normalizeHeader(title) === normalizedTarget) ||
+        'Base_Database';
+
+      // First attempt: read formatted values (fast, works for plain URLs)
+      const formattedResponse = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: cleanSpreadsheetId,
+        range: `${baseSheetTitle}!A:Z`,
+        valueRenderOption: 'FORMATTED_VALUE',
+      });
+      const formattedRows = formattedResponse.data.values || [];
+      const formattedEntries = parseRows(formattedRows, (value) => value);
+      if (formattedEntries.length > 0) {
+        return formattedEntries;
+      }
+
+      // Second attempt: read formulas (captures HYPERLINK formulas)
+      const formulaResponse = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: cleanSpreadsheetId,
+        range: `${baseSheetTitle}!A:Z`,
+        valueRenderOption: 'FORMULA',
+      });
+      const formulaRows = formulaResponse.data.values || [];
+      const formulaEntries = parseRows(formulaRows, (value) => extractUrlFromFormula(value) || value);
+      if (formulaEntries.length > 0) {
+        return formulaEntries;
+      }
+
+      // Final attempt: grid data for smart chips / rich links
       const response = await this.sheets.spreadsheets.get({
         spreadsheetId: cleanSpreadsheetId,
-        ranges: ['Base_Database!A:Z'],
+        ranges: [`${baseSheetTitle}!A:Z`],
         includeGridData: true,
       });
 
       const baseSheet =
-        response.data.sheets?.find((sheet: any) => sheet.properties?.title === 'Base_Database') ||
+        response.data.sheets?.find((sheet: any) => sheet.properties?.title === baseSheetTitle) ||
         response.data.sheets?.[0];
       const rowData = baseSheet?.data?.[0]?.rowData || [];
       if (rowData.length < 2) {
