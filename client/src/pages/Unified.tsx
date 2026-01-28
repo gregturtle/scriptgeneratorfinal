@@ -665,7 +665,7 @@ export default function Unified() {
         <TabsList className="grid w-full grid-cols-4 mb-6">
           <TabsTrigger value="iterations" className="flex items-center gap-2">
             <RefreshCw className="h-4 w-4" />
-            Generate Iterations
+            Generate Iteration Scripts
           </TabsTrigger>
           <TabsTrigger value="generate" className="flex items-center gap-2">
             <Zap className="h-4 w-4" />
