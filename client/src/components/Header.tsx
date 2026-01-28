@@ -18,7 +18,7 @@ export default function Header({ isAuthenticated, onLogout, onLogin }: HeaderPro
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-8">
             <div className="flex items-center">
-              <img src={w3wLogo} alt="what3words" className="h-8 w-8" />
+              <img src={w3wLogo} alt="what3words" className="h-12 w-12" />
               <h1 className="ml-2 text-xl font-semibold text-neutral-900">
                 Meta Creative Asset Generator
               </h1>
