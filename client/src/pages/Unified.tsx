@@ -54,7 +54,7 @@ export default function Unified() {
   const [availableLlmProviders, setAvailableLlmProviders] = useState<{id: string, name: string, available: boolean}[]>([]);
   
   // States for processing existing scripts
-  const [activeTab, setActiveTab] = useState<'iterations' | 'generate' | 'process'>('iterations');
+  const [activeTab, setActiveTab] = useState<'iterations' | 'generate' | 'process'>('generate');
   const [availableTabs, setAvailableTabs] = useState<string[]>([]);
   const [selectedTabs, setSelectedTabs] = useState<string[]>([]);
   const [existingScripts, setExistingScripts] = useState<any[]>([]);
