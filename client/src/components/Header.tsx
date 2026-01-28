@@ -1,6 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Zap, FileText, BarChart3 } from "lucide-react";
-import { Link, useLocation } from "wouter";
 import w3wLogo from "@/assets/w3w-logo.png";
 
 interface HeaderProps {
@@ -10,7 +8,6 @@ interface HeaderProps {
 }
 
 export default function Header({ isAuthenticated, onLogout, onLogin }: HeaderProps) {
-  const [location] = useLocation();
   
   return (
     <header className="bg-white shadow-sm">
@@ -24,19 +21,6 @@ export default function Header({ isAuthenticated, onLogout, onLogin }: HeaderPro
               </h1>
             </div>
             
-            {/* Navigation Tabs */}
-            <nav className="flex space-x-1">
-              <Link href="/">
-                <Button 
-                  variant="default"
-                  size="sm"
-                  className="flex items-center space-x-2"
-                >
-                  <Zap className="h-4 w-4" />
-                  <span>Video Creator</span>
-                </Button>
-              </Link>
-            </nav>
           </div>
           <div>
             {isAuthenticated ? (
