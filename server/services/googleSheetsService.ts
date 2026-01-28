@@ -762,7 +762,7 @@ class GoogleSheetsService {
   }
 
   /**
-   * Record scripts to the Script_Database tab in the user's spreadsheet
+   * Record scripts to the central Script_Database spreadsheet
    * Format: script_batch_id | script_id | timestamp | language_id | script_copy | ai_model | status
    */
   async recordScriptsToDatabase(
@@ -774,8 +774,9 @@ class GoogleSheetsService {
     }>
   ): Promise<{ batchId: string; scriptIds: string[] }> {
     try {
-      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
-      const { lastBatchNum, lastScriptNum } = await this.getLatestScriptDatabaseIds(cleanSpreadsheetId);
+      // Use the central Script_Database spreadsheet, not the user's spreadsheet
+      const scriptDatabaseSheetId = '1elJajodJA1zfzhdlPklw7iTiTaWD11Ij';
+      const { lastBatchNum, lastScriptNum } = await this.getLatestScriptDatabaseIds(scriptDatabaseSheetId);
 
       const newBatchNum = lastBatchNum + 1;
       const batchId = `sb${String(newBatchNum).padStart(5, '0')}`;
@@ -800,7 +801,7 @@ class GoogleSheetsService {
         ];
       });
 
-      await this.appendDataToTab(cleanSpreadsheetId, this.SCRIPT_DATABASE_TAB_NAME, rows);
+      await this.appendDataToTab(scriptDatabaseSheetId, this.SCRIPT_DATABASE_TAB_NAME, rows);
       console.log(`Recorded ${scripts.length} scripts to Script_Database (Batch: ${batchId}, Scripts: ${scriptIds[0]}-${scriptIds[scriptIds.length - 1]})`);
       
       return { batchId, scriptIds };
