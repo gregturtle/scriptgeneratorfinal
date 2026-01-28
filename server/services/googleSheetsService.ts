@@ -872,10 +872,19 @@ class GoogleSheetsService {
       const batchData: Array<{range: string; values: any[][]}> = [];
       const writtenRows: number[] = [];
       
+      // Generate timestamp in ISO format
+      const timestamp = new Date().toISOString();
+      
       for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
         const rowNum = startRow + i;
         writtenRows.push(rowNum);
+        
+        // Add Timestamp to column D
+        batchData.push({
+          range: `${this.ASSET_DATABASE_TAB_NAME}!D${rowNum}`,
+          values: [[timestamp]]
+        });
         
         // Add Base_Id to column E
         batchData.push({
