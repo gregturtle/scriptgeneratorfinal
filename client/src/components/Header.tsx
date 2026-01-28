@@ -19,7 +19,7 @@ export default function Header({ isAuthenticated, onLogout, onLogin }: HeaderPro
             <div className="flex items-center">
               <CircleDashed className="h-8 w-8 text-primary" />
               <h1 className="ml-2 text-xl font-semibold text-neutral-900">
-                Meta Creative Asset Generator <span className="font-bold text-primary">NEW CONCEPTS</span>
+                Meta Creative Asset Generator
               </h1>
             </div>
             
