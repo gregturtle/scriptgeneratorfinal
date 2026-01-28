@@ -466,7 +466,8 @@ class VideoService {
       audioUrl?: string;
     }>,
     backgroundVideoPath: string,
-    includeSubtitles: boolean = false
+    includeSubtitles: boolean = false,
+    baseTitle?: string
   ): Promise<Array<{
     title: string;
     content: string;
@@ -492,7 +493,8 @@ class VideoService {
       if (googleDriveService.isConfigured()) {
         console.log('Google Drive service is configured, creating timestamped subfolder...');
         batchFolderId = await googleDriveService.createTimestampedSubfolder(
-          '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh'
+          '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh',
+          baseTitle
         );
         batchFolderLink = `https://drive.google.com/drive/folders/${batchFolderId}`;
         console.log(`Created batch folder for ${suggestions.length} videos: ${batchFolderLink} (ID: ${batchFolderId})`);

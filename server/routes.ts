@@ -1726,7 +1726,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
             const scriptsWithVideos = await videoService.createVideosForScripts(
               scriptsForThisVideo,
               bgVideo,
-              includeSubtitles
+              includeSubtitles,
+              baseVideo?.baseTitle
             );
             
             // Add the background video name to each result for reference
