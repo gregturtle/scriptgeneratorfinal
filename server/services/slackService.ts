@@ -533,6 +533,7 @@ export class SlackService {
     batchInfo: {
       batchId: string;
       scriptCount: number;
+      spreadsheetId: string;
       scripts: Array<{
         scriptId: string;
         content: string;
@@ -630,7 +631,7 @@ export class SlackService {
                     text: 'APPROVE'
                   },
                   style: 'primary',
-                  value: `approve_script||${batchInfo.batchId}||${scriptNumber}||${script.scriptId}`,
+                  value: `approve_script||${batchInfo.batchId}||${scriptNumber}||${script.scriptId}||${batchInfo.spreadsheetId}`,
                   action_id: `approve_script_${scriptNumber}`
                 },
                 {
@@ -640,7 +641,7 @@ export class SlackService {
                     text: 'REJECT'
                   },
                   style: 'danger',
-                  value: `reject_script||${batchInfo.batchId}||${scriptNumber}||${script.scriptId}`,
+                  value: `reject_script||${batchInfo.batchId}||${scriptNumber}||${script.scriptId}||${batchInfo.spreadsheetId}`,
                   action_id: `reject_script_${scriptNumber}`
                 }
               ]

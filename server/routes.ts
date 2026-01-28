@@ -459,6 +459,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           const scriptBatchData = {
             batchId: result.scriptDatabaseInfo.batchId,
             scriptCount: result.suggestions.length,
+            spreadsheetId: result.scriptDatabaseInfo.spreadsheetId,
             scripts: result.suggestions.map((s: any, index: number) => ({
               scriptId: result.scriptDatabaseInfo!.scriptIds[index],
               content: s.content,
@@ -777,8 +778,10 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         const channel = payload.channel;
         const messageTs = payload.message.ts;
         
-        // Parse action value: actionType||batchName||scriptNumber||fileId
-        const [actionType, batchName, scriptNumber, fileId] = action.value.split('||');
+        // Parse action value: actionType||batchName||scriptNumber||fileId||spreadsheetId (optional)
+        const parts = action.value.split('||');
+        const [actionType, batchName, scriptNumber, fileId] = parts;
+        const spreadsheetId = parts[4] || ''; // Optional spreadsheet ID for script approvals
         
         // Check if this is a script-only approval (no video)
         const isScriptOnlyApproval = actionType === 'approve_script' || actionType === 'reject_script';
@@ -814,9 +817,13 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
               
               // Update script status in Google Sheets Script_Database
               try {
-                const status = isApproved ? 'approved' : 'rejected';
-                await googleSheetsService.updateScriptStatus(fileId, status);
-                console.log(`[SLACK INTERACTION] Updated script ${fileId} status to ${status} in Script_Database`);
+                if (spreadsheetId) {
+                  const status = isApproved ? 'approved' : 'rejected';
+                  await googleSheetsService.updateScriptStatus(spreadsheetId, fileId, status);
+                  console.log(`[SLACK INTERACTION] Updated script ${fileId} status to ${status} in Script_Database`);
+                } else {
+                  console.error(`[SLACK INTERACTION] No spreadsheet ID provided for script status update`);
+                }
               } catch (sheetsError) {
                 console.error(`[SLACK INTERACTION] Error updating script status in sheets:`, sheetsError);
               }

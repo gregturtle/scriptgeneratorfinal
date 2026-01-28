@@ -762,7 +762,7 @@ class GoogleSheetsService {
   }
 
   /**
-   * Record scripts to the central Script_Database spreadsheet
+   * Record scripts to the Script_Database tab in the user's spreadsheet
    * Format: script_batch_id | script_id | timestamp | language_id | script_copy | ai_model | status
    */
   async recordScriptsToDatabase(
@@ -772,11 +772,10 @@ class GoogleSheetsService {
       scriptCopy: string;
       aiModel: string;
     }>
-  ): Promise<{ batchId: string; scriptIds: string[] }> {
+  ): Promise<{ batchId: string; scriptIds: string[]; spreadsheetId: string }> {
     try {
-      // Use the central Script_Database spreadsheet, not the user's spreadsheet
-      const scriptDatabaseSheetId = '1elJajodJA1zfzhdlPklw7iTiTaWD11Ij';
-      const { lastBatchNum, lastScriptNum } = await this.getLatestScriptDatabaseIds(scriptDatabaseSheetId);
+      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
+      const { lastBatchNum, lastScriptNum } = await this.getLatestScriptDatabaseIds(cleanSpreadsheetId);
 
       const newBatchNum = lastBatchNum + 1;
       const batchId = `sb${String(newBatchNum).padStart(5, '0')}`;
@@ -801,10 +800,10 @@ class GoogleSheetsService {
         ];
       });
 
-      await this.appendDataToTab(scriptDatabaseSheetId, this.SCRIPT_DATABASE_TAB_NAME, rows);
+      await this.appendDataToTab(cleanSpreadsheetId, this.SCRIPT_DATABASE_TAB_NAME, rows);
       console.log(`Recorded ${scripts.length} scripts to Script_Database (Batch: ${batchId}, Scripts: ${scriptIds[0]}-${scriptIds[scriptIds.length - 1]})`);
       
-      return { batchId, scriptIds };
+      return { batchId, scriptIds, spreadsheetId: cleanSpreadsheetId };
     } catch (error) {
       console.error('Error recording scripts to database:', error);
       throw error;
@@ -815,12 +814,12 @@ class GoogleSheetsService {
    * Update the status of a script in Script_Database by script_id
    * Searches column B for the script_id and updates column G with the new status
    */
-  async updateScriptStatus(scriptId: string, status: 'approved' | 'rejected' | 'pending'): Promise<boolean> {
+  async updateScriptStatus(spreadsheetId: string, scriptId: string, status: 'approved' | 'rejected' | 'pending'): Promise<boolean> {
     try {
-      const scriptDatabaseSheetId = '1elJajodJA1zfzhdlPklw7iTiTaWD11Ij';
+      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
       
       const response = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: scriptDatabaseSheetId,
+        spreadsheetId: cleanSpreadsheetId,
         range: `${this.SCRIPT_DATABASE_TAB_NAME}!A:G`,
       });
 
@@ -840,7 +839,7 @@ class GoogleSheetsService {
       }
 
       await this.sheets.spreadsheets.values.update({
-        spreadsheetId: scriptDatabaseSheetId,
+        spreadsheetId: cleanSpreadsheetId,
         range: `${this.SCRIPT_DATABASE_TAB_NAME}!G${rowIndex}`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
