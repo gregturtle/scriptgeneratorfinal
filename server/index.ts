@@ -1,7 +1,17 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
 import { storage } from "./storage";
+
+// Simple log function that doesn't depend on vite module
+function log(message: string, source = "express") {
+  const formattedTime = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+  console.log(`${formattedTime} [${source}] ${message}`);
+}
 
 const app = express();
 
@@ -84,8 +94,12 @@ async function autoAuthenticate() {
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
   if (app.get("env") === "development") {
+    // Dynamic import to avoid bundling vite dependencies in production
+    const { setupVite } = await import("./vite");
     await setupVite(app, server);
   } else {
+    // Use separate static module that doesn't depend on vite
+    const { serveStatic } = await import("./static");
     serveStatic(app);
   }
 
