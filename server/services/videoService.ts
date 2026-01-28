@@ -341,7 +341,8 @@ class VideoService {
     batchFolderId?: string | null,
     scriptIndex: number = 0,
     scriptText?: string,
-    includeSubtitles: boolean = false
+    includeSubtitles: boolean = false,
+    customFileName?: string
   ): Promise<VideoCreationResult> {
     let subtitlePath: string | undefined;
     
@@ -390,12 +391,14 @@ class VideoService {
       // Auto-upload to Google Drive batch folder if successful
       if (result.success && result.outputPath && batchFolderId) {
         try {
-          console.log(`Attempting to upload ${outputFileName} to batch folder ${batchFolderId}`);
+          // Use customFileName for Drive upload if provided, otherwise use local file name
+          const driveFileName = customFileName ? `${customFileName}.mp4` : outputFileName;
+          console.log(`Attempting to upload ${driveFileName} to batch folder ${batchFolderId}`);
           const { googleDriveService } = await import('./googleDriveService');
           
           const driveResult = await googleDriveService.uploadVideoToSpecificFolder(
             result.outputPath,
-            outputFileName,
+            driveFileName,
             batchFolderId
           );
 
@@ -464,6 +467,7 @@ class VideoService {
       content: string;
       audioFile?: string;
       audioUrl?: string;
+      fileName?: string;
     }>,
     backgroundVideoPath: string,
     includeSubtitles: boolean = false,
@@ -528,7 +532,8 @@ class VideoService {
         batchFolderId,
         i,
         suggestion.content, // Pass script text for subtitle generation
-        includeSubtitles
+        includeSubtitles,
+        suggestion.fileName // Pass custom fileName from Asset_Database
       );
 
       if (videoResult.success) {

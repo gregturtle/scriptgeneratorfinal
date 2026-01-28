@@ -1717,10 +1717,10 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
             // Get just the filename for the video suffix
             const bgVideoName = path.basename(bgVideo, path.extname(bgVideo)).replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20);
             
-            // Create scripts with video-specific filenames (using formattedScripts for base fileName)
+            // Create scripts with filenames from Asset_Database (exact match required)
             const scriptsForThisVideo = scriptsWithAudio.map((script, idx) => ({
               ...script,
-              fileName: `${formattedScripts[idx].fileName}_${bgVideoName}`
+              fileName: formattedScripts[idx].fileName
             }));
             
             const scriptsWithVideos = await videoService.createVideosForScripts(
