@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
-import { CircleDashed, Zap, FileText, BarChart3 } from "lucide-react";
+import { Zap, FileText, BarChart3 } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import w3wLogo from "@/assets/w3w-logo.png";
 
 interface HeaderProps {
   isAuthenticated: boolean;
@@ -17,7 +18,7 @@ export default function Header({ isAuthenticated, onLogout, onLogin }: HeaderPro
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-8">
             <div className="flex items-center">
-              <CircleDashed className="h-8 w-8 text-primary" />
+              <img src={w3wLogo} alt="what3words" className="h-8 w-8" />
               <h1 className="ml-2 text-xl font-semibold text-neutral-900">
                 Meta Creative Asset Generator
               </h1>
