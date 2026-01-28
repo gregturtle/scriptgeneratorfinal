@@ -396,7 +396,7 @@ class GoogleSheetsService {
    * Read base film entries from the Base_Database tab
    * Base_Id is in column A, file_link is in column G
    */
-  async readBaseDatabase(spreadsheetId: string): Promise<{ baseId: string; fileLink: string }[]> {
+  async readBaseDatabase(spreadsheetId: string): Promise<{ baseId: string; baseTitle: string; fileLink: string }[]> {
     const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
 
     const normalizeHeader = (value: string) =>
@@ -431,22 +431,25 @@ class GoogleSheetsService {
       return cellText(cell);
     };
 
-    const parseRows = (rows: any[][], linkResolver: (value: string) => string): { baseId: string; fileLink: string }[] => {
+    const parseRows = (rows: any[][], linkResolver: (value: string) => string): { baseId: string; baseTitle: string; fileLink: string }[] => {
       if (rows.length < 2) return [];
       const headers = rows[0].map((cell) => (cell ?? '').toString());
       const normalizedHeaders = headers.map(normalizeHeader);
       const baseHeaderIndex = normalizedHeaders.findIndex(h => h === 'baseid' || h === 'baseids');
+      const titleHeaderIndex = normalizedHeaders.findIndex(h => h === 'basetitle');
       const linkHeaderIndex = normalizedHeaders.findIndex(h => h === 'filelink' || h === 'filelinks');
       const baseIndex = baseHeaderIndex !== -1 ? baseHeaderIndex : 0;
+      const titleIndex = titleHeaderIndex !== -1 ? titleHeaderIndex : 1;
       const linkIndex = linkHeaderIndex !== -1 ? linkHeaderIndex : 6;
 
       return rows
         .slice(1)
         .map((row) => {
           const baseId = (row[baseIndex] ?? '').toString().trim();
+          const baseTitle = (row[titleIndex] ?? '').toString().trim();
           const linkRaw = (row[linkIndex] ?? '').toString().trim();
           const fileLink = linkResolver(linkRaw).toString().trim();
-          return { baseId, fileLink };
+          return { baseId, baseTitle, fileLink };
         })
         .filter(entry => entry.baseId && entry.fileLink);
     };

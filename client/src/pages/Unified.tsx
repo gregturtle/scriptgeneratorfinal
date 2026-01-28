@@ -1437,12 +1437,12 @@ export default function Unified() {
                 ) : baseDatabaseEntries.length > 0 ? (
                   <Select value={selectedBaseId} onValueChange={setSelectedBaseId}>
                     <SelectTrigger id="base-id-selector">
-                      <SelectValue placeholder="Select a Base_ID" />
+                      <SelectValue placeholder="Select a Base Film" />
                     </SelectTrigger>
                     <SelectContent className="max-h-60 overflow-y-auto">
-                      {baseDatabaseEntries.map((entry) => (
+                      {baseDatabaseEntries.map((entry: any) => (
                         <SelectItem key={entry.baseId} value={entry.baseId}>
-                          {entry.baseId}
+                          {entry.baseId}{entry.baseTitle ? `_${entry.baseTitle}` : ''}
                         </SelectItem>
                       ))}
                     </SelectContent>
