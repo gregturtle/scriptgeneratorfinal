@@ -679,7 +679,7 @@ export default function Unified() {
           </TabsTrigger>
           <TabsTrigger value="process" className="flex items-center gap-2">
             <Video className="h-4 w-4" />
-            Process Existing Scripts
+            Asset Creation
           </TabsTrigger>
           <TabsTrigger value="meta-upload" className="flex items-center gap-2">
             <Upload className="h-4 w-4" />
@@ -1370,13 +1370,13 @@ export default function Unified() {
       )}
       </TabsContent>
 
-      {/* Process Existing Scripts Tab Content */}
+      {/* Asset Creation Tab Content */}
       <TabsContent value="process" className="space-y-6">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              Process Existing Scripts
+              Asset Creation
             </CardTitle>
             <CardDescription>
               Load scripts from Google Sheets and convert them into videos
