@@ -1506,6 +1506,30 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
     }
   });
 
+  // Read scripts from Script_Database tab
+  app.get('/api/google-sheets/script-database', async (req, res) => {
+    try {
+      const { spreadsheetId } = req.query;
+
+      if (!spreadsheetId || typeof spreadsheetId !== 'string') {
+        return res.status(400).json({ error: 'Spreadsheet ID is required' });
+      }
+
+      const scripts = await googleSheetsService.readScriptDatabase(spreadsheetId);
+      
+      // Get unique batch IDs
+      const batchIds = Array.from(new Set(scripts.map(s => s.scriptBatchId)));
+      
+      res.json({ scripts, batchIds });
+    } catch (error: any) {
+      console.error('Error reading Script_Database from Google Sheets:', error);
+      res.status(500).json({
+        error: 'Failed to read Script_Database from Google Sheets',
+        details: error.message
+      });
+    }
+  });
+
   // Read base films from Base_Database tab
   app.get('/api/google-sheets/base-database', async (req, res) => {
     try {

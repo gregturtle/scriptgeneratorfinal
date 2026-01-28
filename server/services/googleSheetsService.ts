@@ -393,6 +393,51 @@ class GoogleSheetsService {
   }
 
   /**
+   * Read scripts from Script_Database tab
+   * Returns script_batch_id, script_id, timestamp, language_id, script_copy, ai_model, status
+   */
+  async readScriptDatabase(spreadsheetId: string): Promise<{
+    scriptBatchId: string;
+    scriptId: string;
+    timestamp: string;
+    languageId: string;
+    scriptCopy: string;
+    aiModel: string;
+    status: string;
+  }[]> {
+    try {
+      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
+      
+      const response = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: cleanSpreadsheetId,
+        range: `Script_Database!A:G`,
+      });
+      
+      const rows = response.data.values || [];
+      if (rows.length < 2) {
+        return [];
+      }
+      
+      const dataRows = rows.slice(1); // Skip header row
+      
+      return dataRows
+        .filter(row => row[0] && row[1]) // Must have batch_id and script_id
+        .map(row => ({
+          scriptBatchId: (row[0] || '').toString().trim(),
+          scriptId: (row[1] || '').toString().trim(),
+          timestamp: (row[2] || '').toString().trim(),
+          languageId: (row[3] || '').toString().trim(),
+          scriptCopy: (row[4] || '').toString().trim(),
+          aiModel: (row[5] || '').toString().trim(),
+          status: (row[6] || 'pending').toString().trim(),
+        }));
+    } catch (error) {
+      console.error('Error reading Script_Database:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Read base film entries from the Base_Database tab
    * Base_Id is in column A, file_link is in column G
    */

@@ -63,6 +63,13 @@ export default function Unified() {
   const [isLoadingScripts, setIsLoadingScripts] = useState(false);
   const [isProcessingScripts, setIsProcessingScripts] = useState(false);
   
+  // States for Script_Database selection
+  const [scriptDatabaseEntries, setScriptDatabaseEntries] = useState<any[]>([]);
+  const [scriptBatchIds, setScriptBatchIds] = useState<string[]>([]);
+  const [selectedScriptBatchId, setSelectedScriptBatchId] = useState('');
+  const [selectedScriptIds, setSelectedScriptIds] = useState<Set<string>>(new Set());
+  const [isLoadingScriptDatabase, setIsLoadingScriptDatabase] = useState(false);
+  
   // States for iterations tab
   const [iterationsCount, setIterationsCount] = useState(3);
   const [iterationsSpreadsheetId, setIterationsSpreadsheetId] = useState('');
@@ -137,11 +144,11 @@ export default function Unified() {
     loadProviders();
   }, []);
 
-  // Load available tabs and base database when spreadsheet ID changes and activeTab is 'process'
+  // Load base database and script database when spreadsheet ID changes and activeTab is 'process'
   useEffect(() => {
     if (spreadsheetId.trim() && activeTab === 'process') {
-      loadAvailableTabs();
       loadBaseDatabase();
+      loadScriptDatabase();
     }
   }, [spreadsheetId, activeTab]);
 
@@ -247,7 +254,7 @@ export default function Unified() {
 
   // Process selected existing scripts into videos
   const handleProcessExistingScripts = async () => {
-    if (selectedExistingScripts.size === 0) {
+    if (selectedScriptIds.size === 0) {
       toast({
         title: "No scripts selected",
         description: "Please select at least one script to process",
@@ -277,7 +284,16 @@ export default function Unified() {
 
     setIsProcessingScripts(true);
     try {
-      const scriptsToProcess = Array.from(selectedExistingScripts).map(index => existingScripts[index]);
+      // Get selected scripts from Script_Database
+      const scriptsToProcess = scriptDatabaseEntries
+        .filter(script => selectedScriptIds.has(script.scriptId))
+        .map(script => ({
+          scriptTitle: script.scriptId,
+          nativeContent: script.scriptCopy,
+          content: script.scriptCopy,
+          recordingLanguage: script.languageId || 'en',
+          sourceTab: 'Script_Database'
+        }));
       
       const response = await fetch('/api/scripts/process-to-videos', {
         method: 'POST',
@@ -304,10 +320,7 @@ export default function Unified() {
         });
         
         // Reset selection
-        setSelectedExistingScripts(new Set());
-        
-        // Optionally reload scripts to see any updates
-        await loadScriptsFromTab();
+        setSelectedScriptIds(new Set());
       } else {
         const error = await response.json();
         toast({
@@ -528,6 +541,42 @@ export default function Unified() {
       });
     } finally {
       setIsLoadingBaseDatabase(false);
+    }
+  };
+
+  const loadScriptDatabase = async () => {
+    if (!spreadsheetId) return;
+    setIsLoadingScriptDatabase(true);
+    try {
+      const response = await fetch(`/api/google-sheets/script-database?spreadsheetId=${encodeURIComponent(spreadsheetId.trim())}`);
+      if (response.ok) {
+        const data = await response.json();
+        const scripts = data.scripts || [];
+        const batchIds = data.batchIds || [];
+        setScriptDatabaseEntries(scripts);
+        setScriptBatchIds(batchIds);
+        if (batchIds.length > 0) {
+          if (!selectedScriptBatchId || !batchIds.includes(selectedScriptBatchId)) {
+            setSelectedScriptBatchId(batchIds[0]);
+          }
+        } else {
+          setSelectedScriptBatchId('');
+        }
+        setSelectedScriptIds(new Set());
+      } else {
+        setScriptDatabaseEntries([]);
+        setScriptBatchIds([]);
+        setSelectedScriptBatchId('');
+        setSelectedScriptIds(new Set());
+      }
+    } catch (error) {
+      console.error('Error loading script database:', error);
+      setScriptDatabaseEntries([]);
+      setScriptBatchIds([]);
+      setSelectedScriptBatchId('');
+      setSelectedScriptIds(new Set());
+    } finally {
+      setIsLoadingScriptDatabase(false);
     }
   };
 
@@ -1351,77 +1400,103 @@ export default function Unified() {
               />
             </div>
 
-            {/* Tab Selection (Multi-select) */}
-            {spreadsheetId && availableTabs.length > 0 && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Select Google Sheets Tabs</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        if (selectedTabs.length === availableTabs.length) {
-                          setSelectedTabs([]);
-                        } else {
-                          setSelectedTabs([...availableTabs]);
-                        }
-                      }}
-                      disabled={isLoadingTabs}
-                    >
-                      {selectedTabs.length === availableTabs.length ? 'Deselect All' : 'Select All'}
-                    </Button>
-                    <Button
-                      onClick={loadScriptsFromTab}
-                      disabled={selectedTabs.length === 0 || isLoadingScripts}
-                      variant="outline"
-                    >
-                      {isLoadingScripts ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Loading...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="mr-2 h-4 w-4" />
-                          Load Scripts ({selectedTabs.length})
-                        </>
-                      )}
-                    </Button>
-                  </div>
+            {/* Script Batch Selection */}
+            {spreadsheetId && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="batch-id-selector">Script Batch (Script_Database)</Label>
+                  {isLoadingScriptDatabase ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-500 p-3 border rounded-md bg-white">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading Script Batches...
+                    </div>
+                  ) : scriptBatchIds.length > 0 ? (
+                    <Select value={selectedScriptBatchId} onValueChange={(value) => {
+                      setSelectedScriptBatchId(value);
+                      setSelectedScriptIds(new Set());
+                    }}>
+                      <SelectTrigger id="batch-id-selector">
+                        <SelectValue placeholder="Select a Script Batch" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-60 overflow-y-auto">
+                        {scriptBatchIds.map((batchId) => (
+                          <SelectItem key={batchId} value={batchId}>
+                            {batchId}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="text-sm text-amber-700 bg-amber-100 p-3 rounded-md border border-amber-300">
+                      No Script Batches found in Script_Database.
+                    </div>
+                  )}
                 </div>
-                <Card className="p-4 max-h-60 overflow-y-auto">
-                  <div className="space-y-3">
-                    {availableTabs.map((tab) => (
-                      <div key={tab} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`tab-${tab}`}
-                          checked={selectedTabs.includes(tab)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedTabs([...selectedTabs, tab]);
-                            } else {
-                              setSelectedTabs(selectedTabs.filter(t => t !== tab));
-                            }
-                          }}
-                          data-testid={`checkbox-tab-${tab}`}
-                        />
-                        <Label
-                          htmlFor={`tab-${tab}`}
-                          className="text-sm font-normal cursor-pointer"
-                        >
-                          {tab}
-                        </Label>
+
+                {/* Script Selection (filtered by batch) */}
+                {selectedScriptBatchId && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Select Scripts</Label>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const batchScripts = scriptDatabaseEntries.filter(s => s.scriptBatchId === selectedScriptBatchId);
+                          if (selectedScriptIds.size === batchScripts.length) {
+                            setSelectedScriptIds(new Set());
+                          } else {
+                            setSelectedScriptIds(new Set(batchScripts.map(s => s.scriptId)));
+                          }
+                        }}
+                      >
+                        {selectedScriptIds.size === scriptDatabaseEntries.filter(s => s.scriptBatchId === selectedScriptBatchId).length 
+                          ? 'Deselect All' 
+                          : 'Select All'}
+                      </Button>
+                    </div>
+                    <Card className="p-4 max-h-60 overflow-y-auto">
+                      <div className="space-y-3">
+                        {scriptDatabaseEntries
+                          .filter(script => script.scriptBatchId === selectedScriptBatchId)
+                          .map((script) => (
+                            <div key={script.scriptId} className="flex items-start space-x-2">
+                              <Checkbox
+                                id={`script-${script.scriptId}`}
+                                checked={selectedScriptIds.has(script.scriptId)}
+                                onCheckedChange={(checked) => {
+                                  const newSet = new Set(selectedScriptIds);
+                                  if (checked) {
+                                    newSet.add(script.scriptId);
+                                  } else {
+                                    newSet.delete(script.scriptId);
+                                  }
+                                  setSelectedScriptIds(newSet);
+                                }}
+                              />
+                              <div className="flex-1">
+                                <Label
+                                  htmlFor={`script-${script.scriptId}`}
+                                  className="text-sm font-medium cursor-pointer"
+                                >
+                                  {script.scriptId}
+                                </Label>
+                                <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                  {script.scriptCopy.substring(0, 100)}{script.scriptCopy.length > 100 ? '...' : ''}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
                       </div>
-                    ))}
+                    </Card>
+                    <p className="text-xs text-gray-500">
+                      {selectedScriptIds.size === 0 
+                        ? "Select scripts to process"
+                        : `${selectedScriptIds.size} script${selectedScriptIds.size === 1 ? '' : 's'} selected`
+                      }
+                    </p>
                   </div>
-                </Card>
-                <p className="text-xs text-gray-500">
-                  {selectedTabs.length === 0 
-                    ? "Select one or more tabs to load scripts from"
-                    : `${selectedTabs.length} tab${selectedTabs.length === 1 ? '' : 's'} selected`
-                  }
-                </p>
+                )}
               </div>
             )}
 
@@ -1516,31 +1591,13 @@ export default function Unified() {
             </div>
 
             {/* Process Button */}
-            {existingScripts.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">
-                    Selected {selectedExistingScripts.size} of {existingScripts.length} scripts
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (selectedExistingScripts.size === existingScripts.length) {
-                        setSelectedExistingScripts(new Set());
-                      } else {
-                        setSelectedExistingScripts(new Set(existingScripts.map((_, i) => i)));
-                      }
-                    }}
-                  >
-                    {selectedExistingScripts.size === existingScripts.length ? 'Deselect All' : 'Select All'}
-                  </Button>
-                </div>
-                
+            {selectedScriptBatchId && selectedScriptIds.size > 0 && (
+              <div className="pt-4 border-t">
                 <Button
                   onClick={handleProcessExistingScripts}
-                  disabled={isProcessingScripts || selectedExistingScripts.size === 0 || !selectedBaseId}
+                  disabled={isProcessingScripts || selectedScriptIds.size === 0 || !selectedBaseId}
                   className="w-full"
+                  size="lg"
                 >
                   {isProcessingScripts ? (
                     <>
@@ -1550,76 +1607,13 @@ export default function Unified() {
                   ) : (
                     <>
                       <Video className="mr-2 h-4 w-4" />
-                      Process Selected Scripts to Videos
+                      Process {selectedScriptIds.size} Script{selectedScriptIds.size !== 1 ? 's' : ''} to Videos
                     </>
                   )}
                 </Button>
               </div>
             )}
 
-            {/* Display Existing Scripts */}
-            {existingScripts.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Available Scripts</h3>
-                {existingScripts.map((script, index) => (
-                  <Card key={index} className="border">
-                    <CardContent className="pt-4">
-                      <div className="flex items-start gap-3">
-                        <Checkbox
-                          id={`existing-script-${index}`}
-                          checked={selectedExistingScripts.has(index)}
-                          onCheckedChange={(checked) => {
-                            const newSet = new Set(selectedExistingScripts);
-                            if (checked) {
-                              newSet.add(index);
-                            } else {
-                              newSet.delete(index);
-                            }
-                            setSelectedExistingScripts(newSet);
-                          }}
-                          className="mt-1"
-                        />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-medium">{script.scriptTitle}</h4>
-                            {script.sourceTab && selectedTabs.length > 1 && (
-                              <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                                {script.sourceTab}
-                              </span>
-                            )}
-                          </div>
-                          {script.nativeContent && script.recordingLanguage !== 'English' ? (
-                            <div className="mb-3">
-                              <p className="text-sm text-gray-900 mb-1 font-medium italic">
-                                {script.recordingLanguage}: "{script.nativeContent}"
-                              </p>
-                              {script.content && (
-                                <>
-                                  <p className="text-xs text-gray-600 mb-1">English translation:</p>
-                                  <p className="text-sm text-gray-700 italic">"{script.content}"</p>
-                                </>
-                              )}
-                              {script.translationNotes && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                  📝 {script.translationNotes}
-                                </p>
-                              )}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-gray-700 mb-3 italic">
-                              "{script.content || script.nativeContent}"
-                            </p>
-                          )}
-                          <p className="text-xs text-gray-500">
-                            Generated: {script.generatedDate}
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
           </CardContent>
         </Card>
       </TabsContent>
