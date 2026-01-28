@@ -470,7 +470,15 @@ class GoogleSheetsService {
         valueRenderOption: 'FORMATTED_VALUE',
       });
       const formattedRows = formattedResponse.data.values || [];
+      console.log(`Base_Database: Found ${formattedRows.length} rows in tab "${baseSheetTitle}"`);
+      if (formattedRows.length > 0) {
+        console.log('Base_Database headers:', formattedRows[0]);
+        if (formattedRows.length > 1) {
+          console.log('Base_Database first data row:', formattedRows[1]);
+        }
+      }
       const formattedEntries = parseRows(formattedRows, (value) => value);
+      console.log(`Base_Database: parseRows returned ${formattedEntries.length} entries`);
       if (formattedEntries.length > 0) {
         return formattedEntries;
       }
