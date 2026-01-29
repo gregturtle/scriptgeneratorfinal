@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import fetch from "node-fetch";
 import FormData from "form-data";
 import { AdAccount, FacebookAdsApi } from 'facebook-nodejs-business-sdk';
 
