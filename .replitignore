@@ -10,7 +10,6 @@ temp/**
 *.tmp
 
 # Build artifacts (will be rebuilt during deployment)
-node_modules/**
 build/**
 
 # Development files
