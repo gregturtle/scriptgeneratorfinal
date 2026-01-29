@@ -33,7 +33,7 @@ function runBuild() {
         
         console.log('\n📦 Building server...');
         // Use --outfile instead of --outdir to ensure correct output location
-        execSync('npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js', { 
+        execSync('npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js --alias:@shared=./shared', { 
             stdio: 'inherit',
             cwd: __dirname 
         });

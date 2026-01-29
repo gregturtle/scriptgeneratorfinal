@@ -9,7 +9,7 @@ npx vite build
 
 # Build server with esbuild, ensuring correct output location
 echo "📦 Building server..."
-npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js
+npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js --alias:@shared=./shared
 
 # Verify build outputs
 if [ ! -f "dist/index.js" ]; then

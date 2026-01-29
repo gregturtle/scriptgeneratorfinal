@@ -25,7 +25,7 @@ try {
     // Build server with esbuild using --outfile for correct location
     // --external:./vite excludes vite.ts which has dev dependencies
     console.log('\n📦 Building server with esbuild...');
-    execSync('npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js --external:./vite --external:./vite.ts', { 
+    execSync('npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js --external:./vite --external:./vite.ts --alias:@shared=./shared', { 
         stdio: 'inherit',
         cwd: projectRoot 
     });

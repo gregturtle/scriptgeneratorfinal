@@ -19,7 +19,7 @@ try {
 
     // Build server with esbuild, ensuring correct output location
     console.log('📦 Building server...');
-    execSync('npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js', { 
+    execSync('npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js --alias:@shared=./shared', { 
         stdio: 'inherit',
         cwd: projectRoot 
     });
