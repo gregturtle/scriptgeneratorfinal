@@ -1544,12 +1544,13 @@ export default function Unified() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Optimised_For_Country_Id</Label>
+                  <Label>Optimised_For_Country_Id (Global = Gl)</Label>
                   <Select value={sharedCountryId} onValueChange={setSharedCountryId}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select country" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="Gl">Gl</SelectItem>
                       <SelectItem value="Uk">Uk</SelectItem>
                       <SelectItem value="In">In</SelectItem>
                       <SelectItem value="De">De</SelectItem>
