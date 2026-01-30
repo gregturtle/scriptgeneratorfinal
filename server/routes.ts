@@ -204,7 +204,10 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
 
   app.post('/api/ai/generate-scripts', async (req, res) => {
     try {
-      console.log('AI script generation request received:', req.body);
+      console.log('AI script generation request received:', JSON.stringify(req.body, null, 2));
+      console.log('Environment check - OPENAI_API_KEY exists:', !!process.env.OPENAI_API_KEY);
+      console.log('Environment check - GROQ_API_KEY exists:', !!process.env.GROQ_API_KEY);
+      console.log('Environment check - AI_INTEGRATIONS_GEMINI_API_KEY exists:', !!process.env.AI_INTEGRATIONS_GEMINI_API_KEY);
       const { 
         spreadsheetId, 
         generateAudio = true, 
@@ -496,10 +499,12 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       });
     } catch (error) {
       console.error('Error generating AI script suggestions:', error);
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
       
       res.status(500).json({ 
         message: 'Failed to generate script suggestions', 
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
       });
     }
   });
