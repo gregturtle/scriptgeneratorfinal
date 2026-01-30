@@ -5,6 +5,14 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function getDataPath(relativePath: string): string {
+  const isProduction = process.env.NODE_ENV === 'production' || __dirname.includes('/dist');
+  if (isProduction) {
+    return path.join(__dirname, 'data', relativePath);
+  }
+  return path.join(__dirname, '../data', relativePath);
+}
+
 export interface PrimerPattern {
   feature: string;
   direction: 'Lean into' | 'Avoid / soften';
@@ -15,7 +23,9 @@ export interface PrimerPattern {
 }
 
 class PrimerService {
-  private defaultPrimerPath = path.join(__dirname, '../data/default_primer.csv');
+  private get defaultPrimerPath() {
+    return getDataPath('default_primer.csv');
+  }
 
   /**
    * Parse CSV content into primer patterns
@@ -96,12 +106,13 @@ class PrimerService {
     }
     
     // Load from primers folder
-    const primerPath = path.join(__dirname, '../data/primers/guidance_primer.csv');
+    const primerPath = getDataPath('primers/guidance_primer.csv');
+    console.log('Loading primer CSV from:', primerPath, '- exists:', fs.existsSync(primerPath));
     try {
       const csvContent = fs.readFileSync(primerPath, 'utf-8');
       return csvContent;
     } catch (error) {
-      console.error('Error loading primer CSV:', error);
+      console.error('Error loading primer CSV from path:', primerPath, error);
       throw new Error('Failed to load primer CSV from primers folder');
     }
   }

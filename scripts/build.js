@@ -30,6 +30,15 @@ try {
         cwd: projectRoot 
     });
 
+    // Copy server data folder to dist (for primer CSV files)
+    console.log('\n📋 Copying server data files...');
+    const serverDataPath = path.join(projectRoot, 'server', 'data');
+    const distDataPath = path.join(projectRoot, 'dist', 'data');
+    if (fs.existsSync(serverDataPath)) {
+        fs.cpSync(serverDataPath, distDataPath, { recursive: true });
+        console.log('  ✓ Copied server/data to dist/data');
+    }
+
     // Verify build outputs
     const distIndexPath = path.join(projectRoot, 'dist', 'index.js');
     const distPublicPath = path.join(projectRoot, 'dist', 'public');
