@@ -33,6 +33,28 @@ interface ScriptResult {
   savedToSheet: boolean;
 }
 
+interface BaseAssetEntry {
+  baseTitle: string;
+  assetType: string;
+  baseVideoDuration: string;
+  aspectRatio: string;
+  optimizedForCountryId: string;
+  fileLink: string;
+  notes: string;
+}
+
+const MAX_BASE_ASSET_ENTRIES = 10;
+
+const createBlankBaseAssetEntry = (): BaseAssetEntry => ({
+  baseTitle: '',
+  assetType: '',
+  baseVideoDuration: '',
+  aspectRatio: '',
+  optimizedForCountryId: '',
+  fileLink: '',
+  notes: '',
+});
+
 export default function Unified() {
   const [spreadsheetId, setSpreadsheetId] = useState('');
   const [includeSubtitles, setIncludeSubtitles] = useState(false);
@@ -55,7 +77,7 @@ export default function Unified() {
   const [availableLlmProviders, setAvailableLlmProviders] = useState<{id: string, name: string, available: boolean}[]>([]);
   
   // States for processing existing scripts
-  const [activeTab, setActiveTab] = useState<'iterations' | 'generate' | 'process'>('generate');
+  const [activeTab, setActiveTab] = useState<'iterations' | 'generate' | 'process' | 'base-asset'>('generate');
   const [availableTabs, setAvailableTabs] = useState<string[]>([]);
   const [selectedTabs, setSelectedTabs] = useState<string[]>([]);
   const [existingScripts, setExistingScripts] = useState<any[]>([]);
@@ -91,6 +113,10 @@ export default function Unified() {
   const [isLoadingMetaVideos, setIsLoadingMetaVideos] = useState(false);
   const [isUploadingToMeta, setIsUploadingToMeta] = useState(false);
   const [metaUploadProgress, setMetaUploadProgress] = useState<{current: number, total: number, currentVideo?: string}>({current: 0, total: 0});
+
+  // States for base asset form
+  const [baseAssetEntries, setBaseAssetEntries] = useState<BaseAssetEntry[]>([createBlankBaseAssetEntry()]);
+  const [isSubmittingBaseAssets, setIsSubmittingBaseAssets] = useState(false);
 
   const { toast } = useToast();
 
@@ -575,6 +601,118 @@ export default function Unified() {
     }
   };
 
+  const updateBaseAssetEntry = (index: number, field: keyof BaseAssetEntry, value: string) => {
+    setBaseAssetEntries((prev) =>
+      prev.map((entry, i) => (i === index ? { ...entry, [field]: value } : entry))
+    );
+  };
+
+  const addBaseAssetEntry = () => {
+    setBaseAssetEntries((prev) => {
+      if (prev.length >= MAX_BASE_ASSET_ENTRIES) {
+        return prev;
+      }
+      return [...prev, createBlankBaseAssetEntry()];
+    });
+  };
+
+  const removeBaseAssetEntry = (index: number) => {
+    setBaseAssetEntries((prev) => {
+      if (prev.length === 1) {
+        return [createBlankBaseAssetEntry()];
+      }
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const handleSubmitBaseAssets = async () => {
+    if (!spreadsheetId.trim()) {
+      toast({
+        title: "Missing Information",
+        description: "Please provide a Google Sheets URL or ID",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const trimmedEntries = baseAssetEntries.map((entry) => ({
+      baseTitle: entry.baseTitle.trim(),
+      assetType: entry.assetType.trim(),
+      baseVideoDuration: entry.baseVideoDuration.trim(),
+      aspectRatio: entry.aspectRatio.trim(),
+      optimizedForCountryId: entry.optimizedForCountryId.trim(),
+      fileLink: entry.fileLink.trim(),
+      notes: entry.notes.trim(),
+    }));
+
+    const entriesToSubmit = trimmedEntries.filter(entry =>
+      entry.baseTitle ||
+      entry.assetType ||
+      entry.baseVideoDuration ||
+      entry.aspectRatio ||
+      entry.optimizedForCountryId ||
+      entry.fileLink ||
+      entry.notes
+    );
+
+    if (entriesToSubmit.length === 0) {
+      toast({
+        title: "No entries to submit",
+        description: "Add at least one Base Asset entry before submitting.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const missingLinkIndex = entriesToSubmit.findIndex(entry => !entry.fileLink);
+    if (missingLinkIndex !== -1) {
+      toast({
+        title: "File_Link required",
+        description: `Entry ${missingLinkIndex + 1} is missing a File_Link.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsSubmittingBaseAssets(true);
+    try {
+      const response = await fetch('/api/google-sheets/base-database/append', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          spreadsheetId: spreadsheetId.trim(),
+          entries: entriesToSubmit
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        toast({
+          title: "Base assets saved",
+          description: `Added ${data.insertedCount} entr${data.insertedCount === 1 ? 'y' : 'ies'}: ${data.baseIds.join(', ')}`,
+        });
+        setBaseAssetEntries([createBlankBaseAssetEntry()]);
+        loadBaseDatabase();
+      } else {
+        const error = await response.json();
+        toast({
+          title: "Save failed",
+          description: error.error || error.details || "Failed to append to Base_Database",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('Error saving base assets:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to append to Base_Database",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSubmittingBaseAssets(false);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!spreadsheetId.trim()) {
       toast({
@@ -662,8 +800,8 @@ export default function Unified() {
       </div>
 
       {/* Tabs for Iterations, Generate, and Process */}
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'iterations' | 'generate' | 'process')}>
-        <TabsList className="grid w-full grid-cols-3 mb-6">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'iterations' | 'generate' | 'process' | 'base-asset')}>
+        <TabsList className="grid w-full grid-cols-4 mb-6">
           <TabsTrigger value="iterations" className="flex items-center gap-2">
             <RefreshCw className="h-4 w-4" />
             Generate Iteration Scripts
@@ -675,6 +813,10 @@ export default function Unified() {
           <TabsTrigger value="process" className="flex items-center gap-2">
             <Video className="h-4 w-4" />
             Asset Creation
+          </TabsTrigger>
+          <TabsTrigger value="base-asset" className="flex items-center gap-2">
+            <Upload className="h-4 w-4" />
+            Base Asset Form
           </TabsTrigger>
         </TabsList>
 
@@ -1374,6 +1516,171 @@ export default function Unified() {
           </Card>
         </div>
       )}
+      </TabsContent>
+
+      {/* Base Asset Form Tab Content */}
+      <TabsContent value="base-asset" className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5" />
+              Base Asset Form
+            </CardTitle>
+            <CardDescription>
+              Add new base video assets to the Base_Database tab
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Google Sheets URL */}
+            <div className="space-y-2">
+              <Label htmlFor="base-asset-spreadsheet">Google Sheets URL or ID</Label>
+              <Input
+                id="base-asset-spreadsheet"
+                value={spreadsheetId}
+                onChange={(e) => setSpreadsheetId(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/your-sheet-id/edit or just the sheet ID"
+              />
+              <p className="text-xs text-gray-500">
+                Entries will be appended to the Base_Database tab. Base_Id is auto-generated.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <h3 className="text-sm font-medium">Base Asset Entries</h3>
+                <p className="text-xs text-gray-500">
+                  Add up to {MAX_BASE_ASSET_ENTRIES} entries per submission.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addBaseAssetEntry}
+                disabled={baseAssetEntries.length >= MAX_BASE_ASSET_ENTRIES}
+              >
+                Add Entry
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              {baseAssetEntries.map((entry, index) => (
+                <Card key={`base-asset-entry-${index}`} className="border">
+                  <CardHeader className="py-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm">Entry {index + 1}</CardTitle>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeBaseAssetEntry(index)}
+                        disabled={baseAssetEntries.length === 1}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                    <CardDescription className="text-xs">
+                      Base_Id will be auto-assigned on submission.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor={`base-id-${index}`}>Base_Id (auto)</Label>
+                        <Input id={`base-id-${index}`} value="Auto" disabled />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`base-title-${index}`}>Base_Title</Label>
+                        <Input
+                          id={`base-title-${index}`}
+                          value={entry.baseTitle}
+                          onChange={(e) => updateBaseAssetEntry(index, 'baseTitle', e.target.value)}
+                          placeholder="AerialStreetView"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`asset-type-${index}`}>Asset_Type</Label>
+                        <Input
+                          id={`asset-type-${index}`}
+                          value={entry.assetType}
+                          onChange={(e) => updateBaseAssetEntry(index, 'assetType', e.target.value)}
+                          placeholder="Video"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`base-duration-${index}`}>Base_Video_Duration</Label>
+                        <Input
+                          id={`base-duration-${index}`}
+                          value={entry.baseVideoDuration}
+                          onChange={(e) => updateBaseAssetEntry(index, 'baseVideoDuration', e.target.value)}
+                          placeholder="22"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`aspect-ratio-${index}`}>Aspect_Ratio</Label>
+                        <Input
+                          id={`aspect-ratio-${index}`}
+                          value={entry.aspectRatio}
+                          onChange={(e) => updateBaseAssetEntry(index, 'aspectRatio', e.target.value)}
+                          placeholder="9x16"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`optimized-country-${index}`}>Optimised_For_Country_Id</Label>
+                        <Input
+                          id={`optimized-country-${index}`}
+                          value={entry.optimizedForCountryId}
+                          onChange={(e) => updateBaseAssetEntry(index, 'optimizedForCountryId', e.target.value)}
+                          placeholder="IN"
+                        />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor={`file-link-${index}`}>File_Link</Label>
+                        <Input
+                          id={`file-link-${index}`}
+                          value={entry.fileLink}
+                          onChange={(e) => updateBaseAssetEntry(index, 'fileLink', e.target.value)}
+                          placeholder="https://drive.google.com/file/d/..."
+                        />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor={`notes-${index}`}>Notes</Label>
+                        <Textarea
+                          id={`notes-${index}`}
+                          value={entry.notes}
+                          onChange={(e) => updateBaseAssetEntry(index, 'notes', e.target.value)}
+                          placeholder="Optional notes"
+                          className="min-h-16 resize-none"
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            <div className="pt-2">
+              <Button
+                onClick={handleSubmitBaseAssets}
+                disabled={isSubmittingBaseAssets}
+                className="w-full"
+                size="lg"
+              >
+                {isSubmittingBaseAssets ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving Base Assets...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Save {baseAssetEntries.length} Base Asset{baseAssetEntries.length !== 1 ? 's' : ''}
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </TabsContent>
 
       {/* Asset Creation Tab Content */}

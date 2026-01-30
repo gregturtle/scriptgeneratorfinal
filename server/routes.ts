@@ -1615,6 +1615,88 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
     }
   });
 
+  // Append base film entries to Base_Database tab
+  app.post('/api/google-sheets/base-database/append', async (req, res) => {
+    try {
+      const schema = z.object({
+        spreadsheetId: z.string().min(1),
+        entries: z.array(z.object({
+          baseTitle: z.string().optional(),
+          assetType: z.string().optional(),
+          baseVideoDuration: z.string().optional(),
+          aspectRatio: z.string().optional(),
+          optimizedForCountryId: z.string().optional(),
+          fileLink: z.string().optional(),
+          notes: z.string().optional(),
+        })).max(10),
+      });
+
+      const { spreadsheetId, entries } = schema.parse(req.body);
+
+      const cleanedEntries = entries
+        .map(entry => ({
+          baseTitle: (entry.baseTitle || '').trim(),
+          assetType: (entry.assetType || '').trim(),
+          baseVideoDuration: (entry.baseVideoDuration || '').trim(),
+          aspectRatio: (entry.aspectRatio || '').trim(),
+          optimizedForCountryId: (entry.optimizedForCountryId || '').trim(),
+          fileLink: (entry.fileLink || '').trim(),
+          notes: (entry.notes || '').trim(),
+        }))
+        .filter(entry =>
+          entry.baseTitle ||
+          entry.assetType ||
+          entry.baseVideoDuration ||
+          entry.aspectRatio ||
+          entry.optimizedForCountryId ||
+          entry.fileLink ||
+          entry.notes
+        );
+
+      if (cleanedEntries.length === 0) {
+        return res.status(400).json({ error: 'No entries provided' });
+      }
+
+      const missingLink = cleanedEntries.find(entry => !entry.fileLink);
+      if (missingLink) {
+        return res.status(400).json({ error: 'File_Link is required for each entry' });
+      }
+
+      const { nextNumber, width, sheetTitle } = await googleSheetsService.getNextBaseIdInfo(spreadsheetId);
+
+      const rows = cleanedEntries.map((entry, index) => {
+        const baseId = `b${String(nextNumber + index).padStart(width, '0')}`;
+        return [
+          baseId,
+          entry.baseTitle,
+          entry.assetType,
+          entry.baseVideoDuration,
+          entry.aspectRatio,
+          entry.optimizedForCountryId,
+          entry.fileLink,
+          entry.notes,
+        ];
+      });
+
+      await googleSheetsService.appendDataToTab(spreadsheetId, sheetTitle, rows);
+
+      res.json({
+        success: true,
+        insertedCount: rows.length,
+        baseIds: rows.map(row => row[0]),
+      });
+    } catch (error: any) {
+      if (error instanceof ZodError) {
+        return res.status(400).json({ error: fromZodError(error).message });
+      }
+      console.error('Error appending to Base_Database:', error);
+      res.status(500).json({
+        error: 'Failed to append to Base_Database',
+        details: error.message,
+      });
+    }
+  });
+
   // Process existing scripts into videos and send to Slack
   app.post('/api/scripts/process-to-videos', async (req, res) => {
     try {

@@ -62,6 +62,25 @@ class GoogleSheetsService {
     }
   }
 
+  private normalizeSheetTitle(value: string): string {
+    return value.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+  }
+
+  private async resolveBaseDatabaseSheetTitle(cleanSpreadsheetId: string): Promise<string> {
+    const sheetMeta = await this.sheets.spreadsheets.get({
+      spreadsheetId: cleanSpreadsheetId,
+    });
+
+    const normalizedTarget = this.normalizeSheetTitle('Base_Database');
+    const baseSheetTitle =
+      sheetMeta.data.sheets
+        ?.map((sheet: any) => sheet.properties?.title)
+        .find((title: string | undefined) => title && this.normalizeSheetTitle(title) === normalizedTarget) ||
+      'Base_Database';
+
+    return baseSheetTitle;
+  }
+
   /**
    * Create a new Google Sheet for campaign performance data
    */
@@ -500,16 +519,7 @@ class GoogleSheetsService {
     };
 
     try {
-      const sheetMeta = await this.sheets.spreadsheets.get({
-        spreadsheetId: cleanSpreadsheetId,
-      });
-
-      const normalizedTarget = normalizeHeader('Base_Database');
-      const baseSheetTitle =
-        sheetMeta.data.sheets
-          ?.map((sheet: any) => sheet.properties?.title)
-          .find((title: string | undefined) => title && normalizeHeader(title) === normalizedTarget) ||
-        'Base_Database';
+      const baseSheetTitle = await this.resolveBaseDatabaseSheetTitle(cleanSpreadsheetId);
 
       // First attempt: read formatted values (fast, works for plain URLs)
       const formattedResponse = await this.sheets.spreadsheets.values.get({
@@ -572,14 +582,53 @@ class GoogleSheetsService {
         .map((row: any) => {
           const cells = row?.values || [];
           const baseId = cellText(cells[baseIndex]).toString().trim();
+          const baseTitleIndex = normalizedHeaders.findIndex(h => h === 'basetitle');
+          const titleIndex = baseTitleIndex !== -1 ? baseTitleIndex : 1;
+          const baseTitle = cellText(cells[titleIndex]).toString().trim();
           const fileLink = cellLink(cells[linkIndex]).toString().trim();
-          return { baseId, fileLink };
+          return { baseId, baseTitle, fileLink };
         })
         .filter(entry => entry.baseId && entry.fileLink);
     } catch (error) {
       console.error('Error reading base database from tab:', error);
       throw error;
     }
+  }
+
+  /**
+   * Get the next Base_Id value and sheet title for Base_Database
+   */
+  async getNextBaseIdInfo(spreadsheetId: string): Promise<{ nextNumber: number; width: number; sheetTitle: string }> {
+    const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
+    const sheetTitle = await this.resolveBaseDatabaseSheetTitle(cleanSpreadsheetId);
+
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: cleanSpreadsheetId,
+      range: `${sheetTitle}!A:A`,
+      valueRenderOption: 'FORMATTED_VALUE',
+    });
+
+    const rows = response.data.values || [];
+    let maxNum = 0;
+    let width = 5;
+
+    for (let i = 1; i < rows.length; i++) {
+      const raw = (rows[i]?.[0] ?? '').toString().trim();
+      if (!raw) continue;
+      const match = raw.match(/^[bB](\d+)$/);
+      if (!match) continue;
+      const num = parseInt(match[1], 10);
+      if (!Number.isNaN(num)) {
+        maxNum = Math.max(maxNum, num);
+        width = Math.max(width, match[1].length);
+      }
+    }
+
+    return {
+      nextNumber: maxNum + 1,
+      width,
+      sheetTitle,
+    };
   }
 
   /**
