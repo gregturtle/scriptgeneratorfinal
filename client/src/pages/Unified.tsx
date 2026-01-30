@@ -56,7 +56,7 @@ const createBlankBaseAssetEntry = (): BaseAssetEntry => ({
 });
 
 export default function Unified() {
-  const [spreadsheetId, setSpreadsheetId] = useState('');
+  const [spreadsheetId, setSpreadsheetId] = useState('https://docs.google.com/spreadsheets/d/19ZHLAFPEM5A-5c_THNZiCcZARgPrvhFNewBSHGendSA/edit?gid=976600794#gid=976600794');
   const [includeSubtitles, setIncludeSubtitles] = useState(false);
   const [scriptCount, setScriptCount] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
