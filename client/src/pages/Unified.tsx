@@ -33,27 +33,22 @@ interface ScriptResult {
   savedToSheet: boolean;
 }
 
-interface BaseAssetEntry {
+interface BaseAssetRow {
   baseTitle: string;
-  assetType: string;
   baseVideoDuration: string;
-  aspectRatio: string;
-  optimizedForCountryId: string;
   fileLink: string;
   notes: string;
 }
 
-const MAX_BASE_ASSET_ENTRIES = 10;
+const MAX_BASE_ASSET_ROWS = 10;
 
-const createBlankBaseAssetEntry = (): BaseAssetEntry => ({
-  baseTitle: '',
-  assetType: '',
-  baseVideoDuration: '',
-  aspectRatio: '',
-  optimizedForCountryId: '',
-  fileLink: '',
-  notes: '',
-});
+const createBlankRows = (): BaseAssetRow[] => 
+  Array.from({ length: MAX_BASE_ASSET_ROWS }, () => ({
+    baseTitle: '',
+    baseVideoDuration: '',
+    fileLink: '',
+    notes: '',
+  }));
 
 export default function Unified() {
   const [spreadsheetId, setSpreadsheetId] = useState('https://docs.google.com/spreadsheets/d/19ZHLAFPEM5A-5c_THNZiCcZARgPrvhFNewBSHGendSA/edit?gid=976600794#gid=976600794');
@@ -114,8 +109,12 @@ export default function Unified() {
   const [isUploadingToMeta, setIsUploadingToMeta] = useState(false);
   const [metaUploadProgress, setMetaUploadProgress] = useState<{current: number, total: number, currentVideo?: string}>({current: 0, total: 0});
 
-  // States for base asset form
-  const [baseAssetEntries, setBaseAssetEntries] = useState<BaseAssetEntry[]>([createBlankBaseAssetEntry()]);
+  // States for base asset form - shared fields that apply to all entries
+  const [sharedAssetType, setSharedAssetType] = useState('');
+  const [sharedAspectRatio, setSharedAspectRatio] = useState('');
+  const [sharedCountryId, setSharedCountryId] = useState('');
+  // Per-row fields (10 rows max)
+  const [baseAssetRows, setBaseAssetRows] = useState<BaseAssetRow[]>(createBlankRows());
   const [isSubmittingBaseAssets, setIsSubmittingBaseAssets] = useState(false);
 
   const { toast } = useToast();
@@ -601,28 +600,10 @@ export default function Unified() {
     }
   };
 
-  const updateBaseAssetEntry = (index: number, field: keyof BaseAssetEntry, value: string) => {
-    setBaseAssetEntries((prev) =>
-      prev.map((entry, i) => (i === index ? { ...entry, [field]: value } : entry))
+  const updateBaseAssetRow = (index: number, field: keyof BaseAssetRow, value: string) => {
+    setBaseAssetRows((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, [field]: value } : row))
     );
-  };
-
-  const addBaseAssetEntry = () => {
-    setBaseAssetEntries((prev) => {
-      if (prev.length >= MAX_BASE_ASSET_ENTRIES) {
-        return prev;
-      }
-      return [...prev, createBlankBaseAssetEntry()];
-    });
-  };
-
-  const removeBaseAssetEntry = (index: number) => {
-    setBaseAssetEntries((prev) => {
-      if (prev.length === 1) {
-        return [createBlankBaseAssetEntry()];
-      }
-      return prev.filter((_, i) => i !== index);
-    });
   };
 
   const handleSubmitBaseAssets = async () => {
@@ -635,44 +616,30 @@ export default function Unified() {
       return;
     }
 
-    const trimmedEntries = baseAssetEntries.map((entry) => ({
-      baseTitle: entry.baseTitle.trim(),
-      assetType: entry.assetType.trim(),
-      baseVideoDuration: entry.baseVideoDuration.trim(),
-      aspectRatio: entry.aspectRatio.trim(),
-      optimizedForCountryId: entry.optimizedForCountryId.trim(),
-      fileLink: entry.fileLink.trim(),
-      notes: entry.notes.trim(),
-    }));
+    // Filter rows that have at least a fileLink (required field)
+    const filledRows = baseAssetRows
+      .map((row, index) => ({ ...row, originalIndex: index }))
+      .filter(row => row.fileLink.trim());
 
-    const entriesToSubmit = trimmedEntries.filter(entry =>
-      entry.baseTitle ||
-      entry.assetType ||
-      entry.baseVideoDuration ||
-      entry.aspectRatio ||
-      entry.optimizedForCountryId ||
-      entry.fileLink ||
-      entry.notes
-    );
-
-    if (entriesToSubmit.length === 0) {
+    if (filledRows.length === 0) {
       toast({
         title: "No entries to submit",
-        description: "Add at least one Base Asset entry before submitting.",
+        description: "Add at least one File_Link before submitting.",
         variant: "destructive"
       });
       return;
     }
 
-    const missingLinkIndex = entriesToSubmit.findIndex(entry => !entry.fileLink);
-    if (missingLinkIndex !== -1) {
-      toast({
-        title: "File_Link required",
-        description: `Entry ${missingLinkIndex + 1} is missing a File_Link.`,
-        variant: "destructive"
-      });
-      return;
-    }
+    // Combine shared fields with each filled row
+    const entriesToSubmit = filledRows.map(row => ({
+      baseTitle: row.baseTitle.trim(),
+      assetType: sharedAssetType,
+      baseVideoDuration: row.baseVideoDuration.trim(),
+      aspectRatio: sharedAspectRatio,
+      optimizedForCountryId: sharedCountryId,
+      fileLink: row.fileLink.trim(),
+      notes: row.notes.trim(),
+    }));
 
     setIsSubmittingBaseAssets(true);
     try {
@@ -691,7 +658,8 @@ export default function Unified() {
           title: "Base assets saved",
           description: `Added ${data.insertedCount} entr${data.insertedCount === 1 ? 'y' : 'ies'}: ${data.baseIds.join(', ')}`,
         });
-        setBaseAssetEntries([createBlankBaseAssetEntry()]);
+        // Reset rows but keep shared fields
+        setBaseAssetRows(createBlankRows());
         loadBaseDatabase();
       } else {
         const error = await response.json();
@@ -1545,140 +1513,116 @@ export default function Unified() {
               </p>
             </div>
 
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <h3 className="text-sm font-medium">Base Asset Entries</h3>
-                <p className="text-xs text-gray-500">
-                  Add up to {MAX_BASE_ASSET_ENTRIES} entries per submission.
-                </p>
+            {/* Shared fields section */}
+            <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
+              <h3 className="text-sm font-medium">Shared Settings (apply to all entries)</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Asset_Type</Label>
+                  <Select value={sharedAssetType} onValueChange={setSharedAssetType}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Video">Video</SelectItem>
+                      <SelectItem value="Static">Static</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Aspect_Ratio</Label>
+                  <Select value={sharedAspectRatio} onValueChange={setSharedAspectRatio}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select ratio" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="9x16">9x16 (Story/Reel)</SelectItem>
+                      <SelectItem value="1x1">1x1 (Square)</SelectItem>
+                      <SelectItem value="4x5">4x5 (Portrait)</SelectItem>
+                      <SelectItem value="16x9">16x9 (Landscape)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Optimised_For_Country_Id</Label>
+                  <Select value={sharedCountryId} onValueChange={setSharedCountryId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select country" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Uk">Uk</SelectItem>
+                      <SelectItem value="In">In</SelectItem>
+                      <SelectItem value="De">De</SelectItem>
+                      <SelectItem value="Us">Us</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addBaseAssetEntry}
-                disabled={baseAssetEntries.length >= MAX_BASE_ASSET_ENTRIES}
-              >
-                Add Entry
-              </Button>
             </div>
 
-            <div className="space-y-4">
-              {baseAssetEntries.map((entry, index) => (
-                <Card key={`base-asset-entry-${index}`} className="border">
-                  <CardHeader className="py-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm">Entry {index + 1}</CardTitle>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeBaseAssetEntry(index)}
-                        disabled={baseAssetEntries.length === 1}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                    <CardDescription className="text-xs">
-                      Base_Id will be auto-assigned on submission.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor={`base-id-${index}`}>Base_Id (auto)</Label>
-                        <Input id={`base-id-${index}`} value="Auto" disabled />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor={`base-title-${index}`}>Base_Title</Label>
-                        <Input
-                          id={`base-title-${index}`}
-                          value={entry.baseTitle}
-                          onChange={(e) => updateBaseAssetEntry(index, 'baseTitle', e.target.value)}
-                          placeholder="AerialStreetView"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor={`asset-type-${index}`}>Asset_Type</Label>
-                        <Select
-                          value={entry.assetType}
-                          onValueChange={(value) => updateBaseAssetEntry(index, 'assetType', value)}
-                        >
-                          <SelectTrigger id={`asset-type-${index}`}>
-                            <SelectValue placeholder="Select type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Video">Video</SelectItem>
-                            <SelectItem value="Static">Static</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor={`base-duration-${index}`}>Base_Video_Duration (enter NA for static)</Label>
-                        <Input
-                          id={`base-duration-${index}`}
-                          value={entry.baseVideoDuration}
-                          onChange={(e) => updateBaseAssetEntry(index, 'baseVideoDuration', e.target.value)}
-                          placeholder="22"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor={`aspect-ratio-${index}`}>Aspect_Ratio</Label>
-                        <Select
-                          value={entry.aspectRatio}
-                          onValueChange={(value) => updateBaseAssetEntry(index, 'aspectRatio', value)}
-                        >
-                          <SelectTrigger id={`aspect-ratio-${index}`}>
-                            <SelectValue placeholder="Select ratio" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="9x16">9x16 (Story/Reel)</SelectItem>
-                            <SelectItem value="1x1">1x1 (Square)</SelectItem>
-                            <SelectItem value="4x5">4x5 (Portrait)</SelectItem>
-                            <SelectItem value="16x9">16x9 (Landscape)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor={`optimized-country-${index}`}>Optimised_For_Country_Id</Label>
-                        <Select
-                          value={entry.optimizedForCountryId}
-                          onValueChange={(value) => updateBaseAssetEntry(index, 'optimizedForCountryId', value)}
-                        >
-                          <SelectTrigger id={`optimized-country-${index}`}>
-                            <SelectValue placeholder="Select country" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Uk">Uk</SelectItem>
-                            <SelectItem value="In">In</SelectItem>
-                            <SelectItem value="De">De</SelectItem>
-                            <SelectItem value="Us">Us</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2 md:col-span-2">
-                        <Label htmlFor={`file-link-${index}`}>File_Link</Label>
-                        <Input
-                          id={`file-link-${index}`}
-                          value={entry.fileLink}
-                          onChange={(e) => updateBaseAssetEntry(index, 'fileLink', e.target.value)}
-                          placeholder="https://drive.google.com/file/d/..."
-                        />
-                      </div>
-                      <div className="space-y-2 md:col-span-2">
-                        <Label htmlFor={`notes-${index}`}>Notes</Label>
-                        <Textarea
-                          id={`notes-${index}`}
-                          value={entry.notes}
-                          onChange={(e) => updateBaseAssetEntry(index, 'notes', e.target.value)}
-                          placeholder="Optional notes"
-                          className="min-h-16 resize-none"
-                        />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+            {/* Per-entry fields */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium">Entry Fields</h3>
+                <p className="text-xs text-muted-foreground">
+                  Fill rows with File_Link to include them. Base_Id auto-generated.
+                </p>
+              </div>
+              
+              <div className="border rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium w-8">#</th>
+                        <th className="px-3 py-2 text-left font-medium">Base_Title</th>
+                        <th className="px-3 py-2 text-left font-medium">Duration (NA for static)</th>
+                        <th className="px-3 py-2 text-left font-medium">File_Link *</th>
+                        <th className="px-3 py-2 text-left font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {baseAssetRows.map((row, index) => (
+                        <tr key={index} className="border-t">
+                          <td className="px-3 py-2 text-muted-foreground">{index + 1}</td>
+                          <td className="px-1 py-1">
+                            <Input
+                              value={row.baseTitle}
+                              onChange={(e) => updateBaseAssetRow(index, 'baseTitle', e.target.value)}
+                              placeholder="AerialStreetView"
+                              className="h-8 text-sm"
+                            />
+                          </td>
+                          <td className="px-1 py-1">
+                            <Input
+                              value={row.baseVideoDuration}
+                              onChange={(e) => updateBaseAssetRow(index, 'baseVideoDuration', e.target.value)}
+                              placeholder="22"
+                              className="h-8 text-sm w-20"
+                            />
+                          </td>
+                          <td className="px-1 py-1">
+                            <Input
+                              value={row.fileLink}
+                              onChange={(e) => updateBaseAssetRow(index, 'fileLink', e.target.value)}
+                              placeholder="https://drive.google.com/file/d/..."
+                              className="h-8 text-sm"
+                            />
+                          </td>
+                          <td className="px-1 py-1">
+                            <Input
+                              value={row.notes}
+                              onChange={(e) => updateBaseAssetRow(index, 'notes', e.target.value)}
+                              placeholder="Optional"
+                              className="h-8 text-sm"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
 
             <div className="pt-2">
@@ -1696,7 +1640,7 @@ export default function Unified() {
                 ) : (
                   <>
                     <Upload className="mr-2 h-4 w-4" />
-                    Save {baseAssetEntries.length} Base Asset{baseAssetEntries.length !== 1 ? 's' : ''}
+                    Save Base Assets
                   </>
                 )}
               </Button>
