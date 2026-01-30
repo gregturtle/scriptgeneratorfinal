@@ -1649,10 +1649,10 @@ export default function Unified() {
                             <SelectValue placeholder="Select country" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="UK">UK</SelectItem>
-                            <SelectItem value="IN">IN</SelectItem>
-                            <SelectItem value="DE">DE</SelectItem>
-                            <SelectItem value="US">US</SelectItem>
+                            <SelectItem value="Uk">Uk</SelectItem>
+                            <SelectItem value="In">In</SelectItem>
+                            <SelectItem value="De">De</SelectItem>
+                            <SelectItem value="Us">Us</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
