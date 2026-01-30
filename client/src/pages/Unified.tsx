@@ -1600,15 +1600,21 @@ export default function Unified() {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor={`asset-type-${index}`}>Asset_Type</Label>
-                        <Input
-                          id={`asset-type-${index}`}
+                        <Select
                           value={entry.assetType}
-                          onChange={(e) => updateBaseAssetEntry(index, 'assetType', e.target.value)}
-                          placeholder="Video"
-                        />
+                          onValueChange={(value) => updateBaseAssetEntry(index, 'assetType', value)}
+                        >
+                          <SelectTrigger id={`asset-type-${index}`}>
+                            <SelectValue placeholder="Select type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Video">Video</SelectItem>
+                            <SelectItem value="Static">Static</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor={`base-duration-${index}`}>Base_Video_Duration</Label>
+                        <Label htmlFor={`base-duration-${index}`}>Base_Video_Duration (enter NA for static)</Label>
                         <Input
                           id={`base-duration-${index}`}
                           value={entry.baseVideoDuration}
@@ -1618,21 +1624,37 @@ export default function Unified() {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor={`aspect-ratio-${index}`}>Aspect_Ratio</Label>
-                        <Input
-                          id={`aspect-ratio-${index}`}
+                        <Select
                           value={entry.aspectRatio}
-                          onChange={(e) => updateBaseAssetEntry(index, 'aspectRatio', e.target.value)}
-                          placeholder="9x16"
-                        />
+                          onValueChange={(value) => updateBaseAssetEntry(index, 'aspectRatio', value)}
+                        >
+                          <SelectTrigger id={`aspect-ratio-${index}`}>
+                            <SelectValue placeholder="Select ratio" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="9x16">9x16 (Story/Reel)</SelectItem>
+                            <SelectItem value="1x1">1x1 (Square)</SelectItem>
+                            <SelectItem value="4x5">4x5 (Portrait)</SelectItem>
+                            <SelectItem value="16x9">16x9 (Landscape)</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor={`optimized-country-${index}`}>Optimised_For_Country_Id</Label>
-                        <Input
-                          id={`optimized-country-${index}`}
+                        <Select
                           value={entry.optimizedForCountryId}
-                          onChange={(e) => updateBaseAssetEntry(index, 'optimizedForCountryId', e.target.value)}
-                          placeholder="IN"
-                        />
+                          onValueChange={(value) => updateBaseAssetEntry(index, 'optimizedForCountryId', value)}
+                        >
+                          <SelectTrigger id={`optimized-country-${index}`}>
+                            <SelectValue placeholder="Select country" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="UK">UK</SelectItem>
+                            <SelectItem value="IN">IN</SelectItem>
+                            <SelectItem value="DE">DE</SelectItem>
+                            <SelectItem value="US">US</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="space-y-2 md:col-span-2">
                         <Label htmlFor={`file-link-${index}`}>File_Link</Label>
