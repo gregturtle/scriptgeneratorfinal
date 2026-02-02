@@ -47,6 +47,22 @@ class FileService {
     const account = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
     const videoName = path.basename(filePath, path.extname(filePath));
     const uploadUrl = `${FB_GRAPH_VIDEO_API}/${account}/advideos`;
+    const forceResumable = ['1', 'true', 'yes'].includes(
+      (process.env.META_UPLOAD_RESUMABLE || '').toLowerCase()
+    );
+
+    if (forceResumable) {
+      console.log("META_UPLOAD_RESUMABLE enabled; using resumable upload flow.");
+      return this.uploadFileToMetaResumable({
+        accessToken,
+        filePath,
+        account,
+        fileSizeBytes: fileStats.size,
+        videoName,
+        timeoutMs,
+        httpsAgent,
+      });
+    }
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -104,11 +120,22 @@ class FileService {
         lastError = error;
 
         const isTransientTimeout = metaError?.code === 390 && metaError?.error_subcode === 1363030;
-        if (isTransientTimeout && attempt < maxRetries) {
-          const waitTime = attempt * 5000;
-          console.log(`Transient Meta timeout, retrying in ${waitTime / 1000}s...`);
-          await new Promise(r => setTimeout(r, waitTime));
-          continue;
+        if (isTransientTimeout) {
+          console.warn("Meta returned a transient upload timeout. Switching to resumable upload flow...");
+          try {
+            return await this.uploadFileToMetaResumable({
+              accessToken,
+              filePath,
+              account,
+              fileSizeBytes: fileStats.size,
+              videoName,
+              timeoutMs,
+              httpsAgent,
+            });
+          } catch (resumableError: any) {
+            console.error("Resumable upload also failed:", resumableError?.message || resumableError);
+            throw resumableError;
+          }
         }
 
         if (error.code === 'ECONNABORTED') {
@@ -126,6 +153,120 @@ class FileService {
     }
     
     throw lastError || new Error('Upload failed after all retries');
+  }
+
+  private async uploadFileToMetaResumable(params: {
+    accessToken: string;
+    filePath: string;
+    account: string;
+    fileSizeBytes: number;
+    videoName: string;
+    timeoutMs: number;
+    httpsAgent: https.Agent;
+  }): Promise<{ id: string }> {
+    const {
+      accessToken,
+      filePath,
+      account,
+      fileSizeBytes,
+      videoName,
+      timeoutMs,
+      httpsAgent,
+    } = params;
+
+    const uploadUrl = `${FB_GRAPH_VIDEO_API}/${account}/advideos`;
+
+    console.log(`Starting resumable upload for ${videoName} (${(fileSizeBytes / (1024 * 1024)).toFixed(2)} MB)`);
+
+    // Start phase
+    const startForm = new FormData();
+    startForm.append('access_token', accessToken);
+    startForm.append('upload_phase', 'start');
+    startForm.append('file_size', fileSizeBytes.toString());
+    startForm.append('name', videoName);
+
+    const startResponse = await axios.post(uploadUrl, startForm, {
+      headers: startForm.getHeaders(),
+      timeout: timeoutMs,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      httpsAgent,
+    });
+
+    const startData = startResponse.data as any;
+    const uploadSessionId = startData?.upload_session_id;
+    const videoId = startData?.video_id;
+    let startOffset = Number(startData?.start_offset ?? 0);
+    let endOffset = Number(startData?.end_offset ?? 0);
+
+    if (!uploadSessionId || Number.isNaN(startOffset) || Number.isNaN(endOffset)) {
+      throw new Error(`Resumable upload start failed: ${JSON.stringify(startData)}`);
+    }
+
+    console.log(`Resumable upload session ${uploadSessionId} created. video_id=${videoId || 'unknown'}`);
+
+    // Transfer phase
+    while (startOffset < endOffset) {
+      if (endOffset <= startOffset) {
+        break;
+      }
+      const chunkEnd = Math.max(startOffset, endOffset - 1);
+      const chunkStream = fs.createReadStream(filePath, { start: startOffset, end: chunkEnd });
+
+      const transferForm = new FormData();
+      transferForm.append('access_token', accessToken);
+      transferForm.append('upload_phase', 'transfer');
+      transferForm.append('upload_session_id', uploadSessionId);
+      transferForm.append('start_offset', startOffset.toString());
+      transferForm.append('video_file_chunk', chunkStream);
+
+      const transferResponse = await axios.post(uploadUrl, transferForm, {
+        headers: transferForm.getHeaders(),
+        timeout: timeoutMs,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        httpsAgent,
+      });
+
+      const transferData = transferResponse.data as any;
+      const nextStartOffset = Number(transferData?.start_offset);
+      const nextEndOffset = Number(transferData?.end_offset);
+
+      if (Number.isNaN(nextStartOffset) || Number.isNaN(nextEndOffset)) {
+        throw new Error(`Resumable upload transfer failed: ${JSON.stringify(transferData)}`);
+      }
+
+      startOffset = nextStartOffset;
+      endOffset = nextEndOffset;
+      console.log(`Resumable upload progress: ${startOffset}/${fileSizeBytes} bytes`);
+    }
+
+    // Finish phase
+    const finishForm = new FormData();
+    finishForm.append('access_token', accessToken);
+    finishForm.append('upload_phase', 'finish');
+    finishForm.append('upload_session_id', uploadSessionId);
+
+    const finishResponse = await axios.post(uploadUrl, finishForm, {
+      headers: finishForm.getHeaders(),
+      timeout: timeoutMs,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      httpsAgent,
+    });
+
+    const finishData = finishResponse.data as any;
+    if (finishData?.success === false) {
+      throw new Error(`Resumable upload finish failed: ${JSON.stringify(finishData)}`);
+    }
+
+    const resolvedVideoId = finishData?.video_id || videoId;
+    if (!resolvedVideoId) {
+      throw new Error(`Resumable upload finished without video_id: ${JSON.stringify(finishData)}`);
+    }
+
+    console.log(`Resumable upload completed. Video ID: ${resolvedVideoId}`);
+    return { id: resolvedVideoId };
   }
 
   /**
