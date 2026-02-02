@@ -55,51 +55,50 @@ class FileService {
       const fileSizeMB = fileStats.size / (1024 * 1024);
       console.log(`File size: ${fileSizeMB.toFixed(2)} MB`);
       
-      // Initialize Facebook API with the access token
-      initFacebookApi(accessToken);
-      
-      // Use the SDK to create an AdVideo
-      console.log('Using Facebook SDK for video upload...');
-      const adAccount = new AdAccount(adAccountId);
       const fileName = path.basename(filePath);
+      console.log(`Uploading ${fileName} to ${adAccountId} via direct API...`);
       
-      console.log(`Uploading ${fileName} via SDK to ${adAccountId}...`);
+      // Use direct form-data upload with access token in URL (not in form body)
+      const formData = new FormData();
+      formData.append('title', fileName.replace('.mp4', ''));
+      formData.append('source', fs.createReadStream(filePath));
       
-      // Create video using SDK with filepath (not buffer)
-      // The SDK expects 'filepath' parameter for local files
-      const videoParams: Record<string, any> = {
-        title: fileName.replace('.mp4', ''),
-        filepath: filePath,
-      };
+      // Calculate timeout based on file size
+      const timeoutMs = Math.max(120000, 60000 + Math.ceil(fileSizeMB / 5) * 30000);
+      console.log(`Upload timeout: ${timeoutMs / 1000}s`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       
       try {
-        const result = await adAccount.createAdVideo([], videoParams);
-        const videoId = result._data?.id || result.id;
+        const response = await fetch(
+          `${FB_GRAPH_API}/${adAccountId}/advideos?access_token=${accessToken}`,
+          {
+            method: 'POST',
+            body: formData as any,
+            headers: formData.getHeaders(),
+            signal: controller.signal,
+          }
+        );
         
-        if (!videoId) {
-          throw new Error('Video upload succeeded but no ID returned');
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`Upload failed: ${errorText}`);
+          throw new Error(`Failed to upload video: ${errorText}`);
         }
         
-        console.log(`Upload successful via SDK. Received ID: ${videoId}`);
-        return { id: videoId };
-      } catch (sdkError: any) {
-        console.error('SDK upload failed, trying alternative method...', sdkError.message);
+        const data = await response.json() as any;
+        console.log(`Upload successful. Video ID: ${data.id}`);
+        return { id: data.id };
         
-        // Fallback: Try using source_file parameter
-        const altParams: Record<string, any> = {
-          title: fileName.replace('.mp4', ''),
-          source_file: filePath,
-        };
-        
-        const altResult = await adAccount.createAdVideo([], altParams);
-        const altVideoId = altResult._data?.id || altResult.id;
-        
-        if (!altVideoId) {
-          throw new Error('Video upload succeeded but no ID returned');
+      } catch (uploadError: any) {
+        clearTimeout(timeoutId);
+        if (uploadError.name === 'AbortError') {
+          throw new Error(`Upload timeout after ${timeoutMs / 1000}s`);
         }
-        
-        console.log(`Upload successful via SDK (alt method). Received ID: ${altVideoId}`);
-        return { id: altVideoId };
+        throw uploadError;
       }
 
     } catch (error) {
