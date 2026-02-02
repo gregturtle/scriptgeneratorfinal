@@ -182,6 +182,63 @@ class FileService {
     throw lastError || new Error('Upload failed after all retries');
   }
 
+  /**
+   * Upload a video from Google Drive directly to Meta using file_url.
+   * This skips downloading the file locally - Meta fetches it directly from Drive.
+   */
+  async uploadDriveFileToMeta(accessToken: string, driveFileId: string, videoName: string): Promise<{ id: string }> {
+    if (!googleDriveService.isConfigured()) {
+      throw new Error('Google Drive service not configured; cannot use file_url upload');
+    }
+
+    let adAccountId = META_AD_ACCOUNT_ID;
+    if (!adAccountId) {
+      const adAccounts = await this.getAdAccounts(accessToken);
+      if (adAccounts.length === 0) {
+        throw new Error("No ad accounts found for this user");
+      }
+      adAccountId = adAccounts[0];
+    }
+    
+    const account = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+    
+    console.log(`[Drive->Meta] Making file ${driveFileId} public for Meta to fetch...`);
+    const publicInfo = await googleDriveService.makeFilePublic(driveFileId);
+    const fileUrl = publicInfo.downloadUrl;
+
+    console.log(`[Drive->Meta] Uploading ${videoName} to Meta via file_url: ${fileUrl}`);
+
+    const payload = new URLSearchParams();
+    payload.append('access_token', accessToken);
+    payload.append('file_url', fileUrl);
+    payload.append('name', videoName);
+
+    const httpsAgent = new https.Agent({ keepAlive: true });
+    const timeoutMs = 120000; // 2 minutes for Meta to fetch the file
+
+    try {
+      const response = await axios.post(`${FB_GRAPH_VIDEO_API}/${account}/advideos`, payload, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        timeout: timeoutMs,
+        httpsAgent,
+      });
+
+      const result = response.data as any;
+      if (!result?.id) {
+        throw new Error(`Meta file_url upload failed: ${JSON.stringify(result)}`);
+      }
+
+      console.log(`[Drive->Meta] Upload successful! Video ID: ${result.id}`);
+      return { id: result.id };
+    } catch (error: any) {
+      const errorData = error.response?.data || error.message;
+      console.error(`[Drive->Meta] Upload failed:`, JSON.stringify(errorData));
+      throw new Error(`Meta file_url upload failed: ${JSON.stringify(errorData)}`);
+    }
+  }
+
   private async uploadFileToMetaViaUrl(params: {
     accessToken: string;
     filePath: string;

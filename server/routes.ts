@@ -2918,23 +2918,10 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         const videoFileId = asset.videoFileId;
         
         try {
-          console.log(`[Meta Batch Upload] Uploading ${fileName}...`);
+          console.log(`[Meta Batch Upload] Uploading ${fileName} directly from Drive...`);
           
-          // Download from Google Drive
-          const downloadResult = await googleDriveService.downloadVideoFile(videoFileId, `${fileName}.mp4`);
-          if (!downloadResult.success || !downloadResult.filePath) {
-            throw new Error(downloadResult.error || 'Failed to download from Drive');
-          }
-          
-          // Upload to Meta
-          const metaResult = await fileService.uploadFileToMeta(accessToken, downloadResult.filePath);
-          
-          // Clean up temp file
-          try {
-            fs.unlinkSync(downloadResult.filePath);
-          } catch (cleanupError) {
-            console.warn('Failed to cleanup temp file:', cleanupError);
-          }
+          // Upload directly from Google Drive to Meta (no local download)
+          const metaResult = await fileService.uploadDriveFileToMeta(accessToken, videoFileId, fileName);
           
           console.log(`[Meta Batch Upload] Successfully uploaded ${fileName} as Meta ID: ${metaResult.id}`);
           
