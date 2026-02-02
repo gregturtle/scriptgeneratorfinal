@@ -91,12 +91,13 @@ class FileService {
       try {
         console.log('Attempting video upload with optimized settings...');
         
-        // Use the most reliable endpoint with proper headers
+        // Use the most reliable endpoint with proper headers including multipart boundary
         const response = await fetch(`${FB_GRAPH_API}/${adAccountId}/advideos`, {
           method: "POST",
           body: formData as any,
           signal: controller.signal,
           headers: {
+            ...formData.getHeaders(),
             'Connection': 'keep-alive',
           }
         });
