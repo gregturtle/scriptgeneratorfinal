@@ -1906,8 +1906,13 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       let metaAutomationResult: any = null;
       const normalizedMarket = normalizeMetaMarket(metaMarket) || 'UK';
 
+      console.log(`[Meta Automation] Starting for market: ${normalizedMarket}`);
+      console.log(`[Meta Automation] scriptsWithVideos count: ${scriptsWithVideos.length}`);
+      console.log(`[Meta Automation] Sample script keys:`, scriptsWithVideos.length > 0 ? Object.keys(scriptsWithVideos[0]) : 'none');
+
       try {
         const templateIds = getMetaTemplateIds(normalizedMarket);
+        console.log(`[Meta Automation] Template IDs:`, templateIds);
         if (!templateIds.campaignId || !templateIds.adSetId || !templateIds.adId) {
           throw new Error(`Missing Meta template IDs for market ${normalizedMarket}`);
         }
@@ -1916,11 +1921,22 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           (script: any) => script.videoFile || script.videoFileId
         );
 
+        console.log(`[Meta Automation] Assets with videoFile or videoFileId: ${assetsForMeta.length}`);
+        if (assetsForMeta.length > 0) {
+          console.log(`[Meta Automation] First asset details:`, {
+            hasVideoFile: !!assetsForMeta[0].videoFile,
+            hasVideoFileId: !!assetsForMeta[0].videoFileId,
+            videoFile: assetsForMeta[0].videoFile,
+            videoFileId: assetsForMeta[0].videoFileId
+          });
+        }
+
         if (assetsForMeta.length === 0) {
           throw new Error("No video assets available for Meta upload");
         }
 
         const accessToken = await getAccessToken();
+        console.log(`[Meta Automation] Got access token: ${accessToken ? 'yes' : 'no'}`);
         const now = new Date();
         const endTime = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
         const timestamp = now.toISOString().replace(/[:.]/g, "-");
@@ -2022,12 +2038,16 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           }
         }
 
+        console.log(`[Meta Automation] SUCCESS - Campaign created: ${campaignId}`);
+        console.log(`[Meta Automation] Asset results:`, assetResults);
         metaAutomationResult = {
           market: normalizedMarket,
           campaignId,
           assetResults,
         };
       } catch (metaError: any) {
+        console.error("[Meta Automation] FAILED:", metaError.message);
+        console.error("[Meta Automation] Full error:", metaError);
         metaAutomationResult = {
           market: normalizeMetaMarket(metaMarket) || metaMarket || 'UK',
           error: metaError instanceof Error ? metaError.message : String(metaError),
