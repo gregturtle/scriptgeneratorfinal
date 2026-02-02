@@ -231,7 +231,7 @@ class MetaApiService {
     const fields = [
       "id",
       "name",
-      "creative{object_story_spec,asset_feed_spec,story_spec,name}"
+      "creative{object_story_spec,asset_feed_spec,name}"
     ].join(",");
 
     const response = await fetch(
@@ -359,7 +359,7 @@ class MetaApiService {
       throw new Error("Template creative uses asset_feed_spec which is not supported yet");
     }
 
-    const baseSpec = templateCreative.object_story_spec || templateCreative.story_spec;
+    const baseSpec = templateCreative.object_story_spec;
     if (!baseSpec) {
       throw new Error("Template creative missing object_story_spec");
     }
