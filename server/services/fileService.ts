@@ -17,8 +17,8 @@ function initFacebookApi(accessToken: string) {
 
 class FileService {
   /**
-   * Upload a file to Meta's asset library using the Facebook SDK
-   * This is the original working approach that uses the SDK's createAdVideo method
+   * Upload a file to Meta's asset library using direct FormData with file stream
+   * This is the proven working approach from the original codebase
    */
   async uploadFileToMeta(accessToken: string, filePath: string): Promise<{ id: string }> {
     try {
@@ -52,34 +52,50 @@ class FileService {
       const fileSizeMB = fileStats.size / (1024 * 1024);
       console.log(`File size: ${fileSizeMB.toFixed(2)} MB`);
       
-      // Initialize Facebook API with the access token
-      initFacebookApi(accessToken);
+      // Create form data with file stream - the original working approach
+      const fileStream = fs.createReadStream(filePath);
+      const formData = new FormData();
+      formData.append("access_token", accessToken);
+      formData.append("file", fileStream);
       
-      // Use the SDK to create an AdVideo
-      console.log('Using Facebook SDK for video upload...');
-      const adAccount = new AdAccount(adAccountId);
+      // Calculate timeout based on file size (minimum 120s, +60s per 10MB)
+      const timeoutMs = Math.max(120000, 120000 + Math.ceil(fileSizeMB / 10) * 60000);
+      console.log(`Upload timeout: ${timeoutMs / 1000}s`);
       
-      // Read file as buffer for the SDK
-      const fileBuffer = fs.readFileSync(filePath);
-      const fileName = path.basename(filePath);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       
-      console.log(`Uploading ${fileName} via SDK to ${adAccountId}...`);
+      console.log(`Uploading to ${FB_GRAPH_API}/${adAccountId}/advideos...`);
       
-      // Create video using SDK
-      const videoParams = {
-        source: fileBuffer,
-        title: fileName.replace('.mp4', ''),
-      };
-      
-      const result = await adAccount.createAdVideo([], videoParams);
-      const videoId = (result as any)._data?.id || (result as any).id;
-      
-      if (!videoId) {
-        throw new Error('Video upload succeeded but no ID returned');
+      try {
+        const response = await fetch(`${FB_GRAPH_API}/${adAccountId}/advideos`, {
+          method: "POST",
+          body: formData as any,
+          signal: controller.signal,
+          headers: {
+            'Connection': 'keep-alive',
+          }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`Upload error response: ${errorText}`);
+          throw new Error(`Failed to upload file to Meta: ${errorText}`);
+        }
+        
+        const data = await response.json() as any;
+        console.log(`Upload successful. Received ID: ${data.id}`);
+        return { id: data.id };
+        
+      } catch (uploadError: any) {
+        clearTimeout(timeoutId);
+        if (uploadError.name === 'AbortError') {
+          throw new Error(`Upload timeout after ${timeoutMs / 1000}s - file may be too large (${fileSizeMB.toFixed(2)} MB)`);
+        }
+        throw uploadError;
       }
-      
-      console.log(`Upload successful via SDK. Received ID: ${videoId}`);
-      return { id: videoId };
 
     } catch (error) {
       console.error("Error uploading file to Meta:", error);
