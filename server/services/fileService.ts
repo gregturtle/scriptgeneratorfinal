@@ -17,8 +17,10 @@ function initFacebookApi(accessToken: string) {
 
 class FileService {
   /**
-   * Upload a file to Meta's asset library using direct FormData with file stream
-   * This is the proven working approach from the original codebase
+   * Upload a video file to Meta using the proven working approach:
+   * - FormData with fs.createReadStream (not buffer)
+   * - access_token as query parameter
+   * - form.getHeaders() for proper Content-Type with boundary
    */
   async uploadFileToMeta(accessToken: string, filePath: string): Promise<{ id: string }> {
     try {
@@ -29,73 +31,47 @@ class FileService {
       }
       
       const fileStats = fs.statSync(filePath);
-      console.log(`File size: ${fileStats.size} bytes, Last modified: ${fileStats.mtime}`);
+      const fileSizeMB = fileStats.size / (1024 * 1024);
+      console.log(`File size: ${fileSizeMB.toFixed(2)} MB`);
       
       let adAccountId = META_AD_ACCOUNT_ID;
-      console.log(`Using ad account ID: ${adAccountId}`);
-      
       if (!adAccountId) {
-        console.log("No ad account ID in environment, fetching from API...");
         const adAccounts = await this.getAdAccounts(accessToken);
         if (adAccounts.length === 0) {
           throw new Error("No ad accounts found for this user");
         }
         adAccountId = adAccounts[0];
-        console.log(`Fetched ad account ID: ${adAccountId}`);
       }
       
-      if (!adAccountId.startsWith('act_')) {
-        adAccountId = `act_${adAccountId}`;
-        console.log(`Formatted ad account ID: ${adAccountId}`);
+      // Ensure account ID has 'act_' prefix
+      const account = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+      console.log(`Using ad account: ${account}`);
+      
+      const videoName = path.basename(filePath, '.mp4');
+      
+      // Create FormData with file stream (not buffer - Meta expects a stream)
+      const form = new FormData();
+      form.append('source', fs.createReadStream(filePath));  // File as readable stream
+      form.append('name', videoName);
+      
+      const uploadUrl = `https://graph.facebook.com/v21.0/${account}/advideos?access_token=${accessToken}`;
+      console.log(`Uploading ${videoName} to Meta...`);
+      
+      const response = await fetch(uploadUrl, {
+        method: 'POST',
+        body: form as any,
+        headers: form.getHeaders(),  // Critical: includes Content-Type with boundary
+      });
+      
+      if (!response.ok) {
+        const error = await response.text();
+        console.error(`Meta video upload failed: ${error}`);
+        throw new Error(`Meta video upload failed: ${error}`);
       }
-
-      const fileSizeMB = fileStats.size / (1024 * 1024);
-      console.log(`File size: ${fileSizeMB.toFixed(2)} MB`);
       
-      // Create form data with file stream - the original working approach
-      const fileStream = fs.createReadStream(filePath);
-      const formData = new FormData();
-      formData.append("access_token", accessToken);
-      formData.append("file", fileStream);
-      
-      // Calculate timeout based on file size (minimum 120s, +60s per 10MB)
-      const timeoutMs = Math.max(120000, 120000 + Math.ceil(fileSizeMB / 10) * 60000);
-      console.log(`Upload timeout: ${timeoutMs / 1000}s`);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-      
-      console.log(`Uploading to ${FB_GRAPH_API}/${adAccountId}/advideos...`);
-      
-      try {
-        const response = await fetch(`${FB_GRAPH_API}/${adAccountId}/advideos`, {
-          method: "POST",
-          body: formData as any,
-          signal: controller.signal,
-          headers: {
-            'Connection': 'keep-alive',
-          }
-        });
-        
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`Upload error response: ${errorText}`);
-          throw new Error(`Failed to upload file to Meta: ${errorText}`);
-        }
-        
-        const data = await response.json() as any;
-        console.log(`Upload successful. Received ID: ${data.id}`);
-        return { id: data.id };
-        
-      } catch (uploadError: any) {
-        clearTimeout(timeoutId);
-        if (uploadError.name === 'AbortError') {
-          throw new Error(`Upload timeout after ${timeoutMs / 1000}s - file may be too large (${fileSizeMB.toFixed(2)} MB)`);
-        }
-        throw uploadError;
-      }
+      const result = await response.json() as any;
+      console.log(`Upload successful. Video ID: ${result.id}`);
+      return { id: result.id };
 
     } catch (error) {
       console.error("Error uploading file to Meta:", error);
