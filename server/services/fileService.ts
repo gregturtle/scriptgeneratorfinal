@@ -1,11 +1,14 @@
 import fs from "fs";
 import path from "path";
 import FormData from "form-data";
-import { AdAccount, AdVideo, FacebookAdsApi } from 'facebook-nodejs-business-sdk';
+import axios from "axios";
+import * as https from "https";
+import { AdAccount, FacebookAdsApi } from 'facebook-nodejs-business-sdk';
 
 // Facebook Graph API base URL
 const FB_API_VERSION = "v23.0";
 const FB_GRAPH_API = `https://graph.facebook.com/${FB_API_VERSION}`;
+const FB_GRAPH_VIDEO_API = `https://graph-video.facebook.com/${FB_API_VERSION}`;
 
 // Get ad account ID from environment variable
 const META_AD_ACCOUNT_ID = process.env.META_AD_ACCOUNT_ID || "";
@@ -17,88 +20,105 @@ function initFacebookApi(accessToken: string) {
 
 class FileService {
   /**
-   * Upload a video file to Meta using the proven working approach:
-   * - FormData with fs.createReadStream (not buffer)
-   * - access_token as query parameter
-   * - form.getHeaders() for proper Content-Type with boundary
-   * - Retry logic for transient errors
+   * Upload a video file to Meta with streaming FormData and retry support.
    */
   async uploadFileToMeta(accessToken: string, filePath: string): Promise<{ id: string }> {
     const maxRetries = 3;
     let lastError: Error | null = null;
+
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File does not exist at path: ${filePath}`);
+    }
     
+    const fileStats = fs.statSync(filePath);
+    const fileSizeMB = fileStats.size / (1024 * 1024);
+    const timeoutMs = Math.max(60000, 60000 + Math.ceil(fileSizeMB / 10) * 30000);
+    const httpsAgent = new https.Agent({ keepAlive: true });
+
+    let adAccountId = META_AD_ACCOUNT_ID;
+    if (!adAccountId) {
+      const adAccounts = await this.getAdAccounts(accessToken);
+      if (adAccounts.length === 0) {
+        throw new Error("No ad accounts found for this user");
+      }
+      adAccountId = adAccounts[0];
+    }
+    
+    const account = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+    const videoName = path.basename(filePath, path.extname(filePath));
+    const uploadUrl = `${FB_GRAPH_VIDEO_API}/${account}/advideos`;
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`Starting Meta file upload (attempt ${attempt}/${maxRetries}): ${filePath}`);
-        
-        if (!fs.existsSync(filePath)) {
-          throw new Error(`File does not exist at path: ${filePath}`);
-        }
-        
-        const fileStats = fs.statSync(filePath);
-        const fileSizeMB = fileStats.size / (1024 * 1024);
         console.log(`File size: ${fileSizeMB.toFixed(2)} MB`);
-        
-        let adAccountId = META_AD_ACCOUNT_ID;
-        if (!adAccountId) {
-          const adAccounts = await this.getAdAccounts(accessToken);
-          if (adAccounts.length === 0) {
-            throw new Error("No ad accounts found for this user");
-          }
-          adAccountId = adAccounts[0];
-        }
-        
-        // Ensure account ID has 'act_' prefix
-        const account = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
         console.log(`Using ad account: ${account}`);
-        
-        const videoName = path.basename(filePath, '.mp4');
-        
-        // Create FormData with file stream (not buffer - Meta expects a stream)
+
         const form = new FormData();
-        form.append('source', fs.createReadStream(filePath));  // File as readable stream
+        form.append('access_token', accessToken);
+        form.append('source', fs.createReadStream(filePath));
         form.append('name', videoName);
-        
-        const uploadUrl = `https://graph.facebook.com/v21.0/${account}/advideos?access_token=${accessToken}`;
-        console.log(`Uploading ${videoName} to Meta...`);
-        
-        const response = await fetch(uploadUrl, {
-          method: 'POST',
-          body: form as any,
-          headers: form.getHeaders(),  // Critical: includes Content-Type with boundary
-        });
-        
-        if (!response.ok) {
-          const error = await response.text();
-          console.error(`Meta video upload failed: ${error}`);
-          
-          // Check if it's a transient error that should be retried
-          if (error.includes('"is_transient":true') && attempt < maxRetries) {
-            const waitTime = attempt * 5000; // 5s, 10s, 15s
-            console.log(`Transient error, retrying in ${waitTime/1000}s...`);
-            await new Promise(r => setTimeout(r, waitTime));
-            continue;
-          }
-          
-          throw new Error(`Meta video upload failed: ${error}`);
+
+        const headers = form.getHeaders();
+        try {
+          const contentLength = await new Promise<number>((resolve, reject) => {
+            form.getLength((err, length) => {
+              if (err) {
+                reject(err);
+                return;
+              }
+              resolve(length);
+            });
+          });
+          headers['Content-Length'] = contentLength;
+        } catch (lengthError) {
+          console.warn('Could not determine upload content length; proceeding with chunked transfer.', lengthError);
         }
-        
-        const result = await response.json() as any;
+
+        console.log(`Uploading ${videoName} to Meta...`);
+
+        const response = await axios.post(uploadUrl, form, {
+          headers,
+          timeout: timeoutMs,
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+          httpsAgent,
+        });
+
+        const result = response.data as any;
+        if (!result?.id) {
+          throw new Error(`Meta video upload failed: ${JSON.stringify(result)}`);
+        }
+
         console.log(`Upload successful. Video ID: ${result.id}`);
         return { id: result.id };
 
       } catch (error: any) {
-        console.error(`Error uploading file to Meta (attempt ${attempt}):`, error.message);
+        const metaError = error?.response?.data?.error;
+        if (metaError) {
+          console.error(`Meta video upload failed: ${JSON.stringify(metaError)}`);
+        } else {
+          console.error(`Error uploading file to Meta (attempt ${attempt}):`, error.message);
+        }
+
         lastError = error;
-        
-        // Check if it's a transient error that should be retried
-        if (error.message?.includes('is_transient') && attempt < maxRetries) {
+
+        const isTransientTimeout = metaError?.code === 390 && metaError?.error_subcode === 1363030;
+        if (isTransientTimeout && attempt < maxRetries) {
           const waitTime = attempt * 5000;
-          console.log(`Transient error, retrying in ${waitTime/1000}s...`);
+          console.log(`Transient Meta timeout, retrying in ${waitTime / 1000}s...`);
           await new Promise(r => setTimeout(r, waitTime));
           continue;
         }
-        
+
+        if (error.code === 'ECONNABORTED') {
+          throw new Error(`Upload timeout after ${timeoutMs / 1000}s - file may be too large (${fileSizeMB.toFixed(2)} MB)`);
+        }
+
+        if (error.code === 'ECONNRESET' || error.message?.includes('socket hang up')) {
+          throw new Error(`Network connection lost during upload - try again or check file size (${fileSizeMB.toFixed(2)} MB)`);
+        }
+
         if (attempt === maxRetries) {
           throw error;
         }
