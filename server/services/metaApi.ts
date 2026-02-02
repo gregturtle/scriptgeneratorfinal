@@ -370,6 +370,15 @@ class MetaApiService {
       throw new Error("Template creative does not reference a video_id");
     }
 
+    // Fix: Meta only allows one of image_url or image_hash in video_data
+    // Remove image_url if image_hash exists, or vice versa
+    if (specClone.video_data) {
+      if (specClone.video_data.image_hash && specClone.video_data.image_url) {
+        delete specClone.video_data.image_url; // Prefer image_hash
+        console.log('[Meta Creative] Removed redundant image_url from video_data');
+      }
+    }
+
     const payload = stripUndefined({
       name: options.name,
       object_story_spec: specClone,
