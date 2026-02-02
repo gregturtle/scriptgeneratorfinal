@@ -21,62 +21,91 @@ class FileService {
    * - FormData with fs.createReadStream (not buffer)
    * - access_token as query parameter
    * - form.getHeaders() for proper Content-Type with boundary
+   * - Retry logic for transient errors
    */
   async uploadFileToMeta(accessToken: string, filePath: string): Promise<{ id: string }> {
-    try {
-      console.log(`Starting Meta file upload for: ${filePath}`);
-      
-      if (!fs.existsSync(filePath)) {
-        throw new Error(`File does not exist at path: ${filePath}`);
-      }
-      
-      const fileStats = fs.statSync(filePath);
-      const fileSizeMB = fileStats.size / (1024 * 1024);
-      console.log(`File size: ${fileSizeMB.toFixed(2)} MB`);
-      
-      let adAccountId = META_AD_ACCOUNT_ID;
-      if (!adAccountId) {
-        const adAccounts = await this.getAdAccounts(accessToken);
-        if (adAccounts.length === 0) {
-          throw new Error("No ad accounts found for this user");
+    const maxRetries = 3;
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Starting Meta file upload (attempt ${attempt}/${maxRetries}): ${filePath}`);
+        
+        if (!fs.existsSync(filePath)) {
+          throw new Error(`File does not exist at path: ${filePath}`);
         }
-        adAccountId = adAccounts[0];
-      }
-      
-      // Ensure account ID has 'act_' prefix
-      const account = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
-      console.log(`Using ad account: ${account}`);
-      
-      const videoName = path.basename(filePath, '.mp4');
-      
-      // Create FormData with file stream (not buffer - Meta expects a stream)
-      const form = new FormData();
-      form.append('source', fs.createReadStream(filePath));  // File as readable stream
-      form.append('name', videoName);
-      
-      const uploadUrl = `https://graph.facebook.com/v21.0/${account}/advideos?access_token=${accessToken}`;
-      console.log(`Uploading ${videoName} to Meta...`);
-      
-      const response = await fetch(uploadUrl, {
-        method: 'POST',
-        body: form as any,
-        headers: form.getHeaders(),  // Critical: includes Content-Type with boundary
-      });
-      
-      if (!response.ok) {
-        const error = await response.text();
-        console.error(`Meta video upload failed: ${error}`);
-        throw new Error(`Meta video upload failed: ${error}`);
-      }
-      
-      const result = await response.json() as any;
-      console.log(`Upload successful. Video ID: ${result.id}`);
-      return { id: result.id };
+        
+        const fileStats = fs.statSync(filePath);
+        const fileSizeMB = fileStats.size / (1024 * 1024);
+        console.log(`File size: ${fileSizeMB.toFixed(2)} MB`);
+        
+        let adAccountId = META_AD_ACCOUNT_ID;
+        if (!adAccountId) {
+          const adAccounts = await this.getAdAccounts(accessToken);
+          if (adAccounts.length === 0) {
+            throw new Error("No ad accounts found for this user");
+          }
+          adAccountId = adAccounts[0];
+        }
+        
+        // Ensure account ID has 'act_' prefix
+        const account = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+        console.log(`Using ad account: ${account}`);
+        
+        const videoName = path.basename(filePath, '.mp4');
+        
+        // Create FormData with file stream (not buffer - Meta expects a stream)
+        const form = new FormData();
+        form.append('source', fs.createReadStream(filePath));  // File as readable stream
+        form.append('name', videoName);
+        
+        const uploadUrl = `https://graph.facebook.com/v21.0/${account}/advideos?access_token=${accessToken}`;
+        console.log(`Uploading ${videoName} to Meta...`);
+        
+        const response = await fetch(uploadUrl, {
+          method: 'POST',
+          body: form as any,
+          headers: form.getHeaders(),  // Critical: includes Content-Type with boundary
+        });
+        
+        if (!response.ok) {
+          const error = await response.text();
+          console.error(`Meta video upload failed: ${error}`);
+          
+          // Check if it's a transient error that should be retried
+          if (error.includes('"is_transient":true') && attempt < maxRetries) {
+            const waitTime = attempt * 5000; // 5s, 10s, 15s
+            console.log(`Transient error, retrying in ${waitTime/1000}s...`);
+            await new Promise(r => setTimeout(r, waitTime));
+            continue;
+          }
+          
+          throw new Error(`Meta video upload failed: ${error}`);
+        }
+        
+        const result = await response.json() as any;
+        console.log(`Upload successful. Video ID: ${result.id}`);
+        return { id: result.id };
 
-    } catch (error) {
-      console.error("Error uploading file to Meta:", error);
-      throw error;
+      } catch (error: any) {
+        console.error(`Error uploading file to Meta (attempt ${attempt}):`, error.message);
+        lastError = error;
+        
+        // Check if it's a transient error that should be retried
+        if (error.message?.includes('is_transient') && attempt < maxRetries) {
+          const waitTime = attempt * 5000;
+          console.log(`Transient error, retrying in ${waitTime/1000}s...`);
+          await new Promise(r => setTimeout(r, waitTime));
+          continue;
+        }
+        
+        if (attempt === maxRetries) {
+          throw error;
+        }
+      }
     }
+    
+    throw lastError || new Error('Upload failed after all retries');
   }
 
   /**
