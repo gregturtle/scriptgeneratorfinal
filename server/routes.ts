@@ -1903,157 +1903,16 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       
       let scriptsWithVideos = allScriptsWithVideos;
 
-      let metaAutomationResult: any = null;
-      const normalizedMarket = normalizeMetaMarket(metaMarket) || 'UK';
-
-      console.log(`[Meta Automation] Starting for market: ${normalizedMarket}`);
-      console.log(`[Meta Automation] scriptsWithVideos count: ${scriptsWithVideos.length}`);
-      console.log(`[Meta Automation] Sample script keys:`, scriptsWithVideos.length > 0 ? Object.keys(scriptsWithVideos[0]) : 'none');
-
-      try {
-        const templateIds = getMetaTemplateIds(normalizedMarket);
-        console.log(`[Meta Automation] Template IDs:`, templateIds);
-        if (!templateIds.campaignId || !templateIds.adSetId || !templateIds.adId) {
-          throw new Error(`Missing Meta template IDs for market ${normalizedMarket}`);
-        }
-
-        const assetsForMeta = scriptsWithVideos.filter(
-          (script: any) => script.videoFile || script.videoFileId
-        );
-
-        console.log(`[Meta Automation] Assets with videoFile or videoFileId: ${assetsForMeta.length}`);
-        if (assetsForMeta.length > 0) {
-          console.log(`[Meta Automation] First asset details:`, {
-            hasVideoFile: !!assetsForMeta[0].videoFile,
-            hasVideoFileId: !!assetsForMeta[0].videoFileId,
-            videoFile: assetsForMeta[0].videoFile,
-            videoFileId: assetsForMeta[0].videoFileId
-          });
-        }
-
-        if (assetsForMeta.length === 0) {
-          throw new Error("No video assets available for Meta upload");
-        }
-
-        const accessToken = await getAccessToken();
-        console.log(`[Meta Automation] Got access token: ${accessToken ? 'yes' : 'no'}`);
-        const now = new Date();
-        const endTime = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const timestamp = now.toISOString().replace(/[:.]/g, "-");
-        const campaignName = `Auto ${normalizedMarket} ${timestamp}`;
-
-        const campaignId = await metaApiService.createCampaignFromTemplate(
-          accessToken,
-          templateIds.campaignId,
-          {
-            name: campaignName,
-            startTime: now,
-            endTime,
-            status: "PAUSED",
-          }
-        );
-
-        const adSetTemplate = await metaApiService.getAdSetTemplate(accessToken, templateIds.adSetId);
-        const creativeTemplate = await metaApiService.getAdCreativeTemplateFromAd(accessToken, templateIds.adId);
-
-        const assetResults: any[] = [];
-
-        for (let i = 0; i < assetsForMeta.length; i++) {
-          const asset = assetsForMeta[i];
-          const assetName = asset.fileName || asset.title || `Asset ${i + 1}`;
-          let localVideoPath = asset.videoFile;
-          let downloadedTemp = false;
-
-          try {
-            if (!localVideoPath || !fs.existsSync(localVideoPath)) {
-              if (asset.videoFileId && googleDriveService.isConfigured()) {
-                const downloadResult = await googleDriveService.downloadVideoFile(
-                  asset.videoFileId,
-                  `${assetName}.mp4`
-                );
-                if (!downloadResult.success || !downloadResult.filePath) {
-                  throw new Error(downloadResult.error || "Failed to download video from Google Drive");
-                }
-                localVideoPath = downloadResult.filePath;
-                downloadedTemp = true;
-              } else {
-                throw new Error("Local video file missing and Google Drive download unavailable");
-              }
-            }
-
-            const videoId = await metaApiService.uploadVideoWithSDK(
-              accessToken,
-              localVideoPath,
-              assetName
-            );
-
-            const adSetId = await metaApiService.createAdSetFromTemplate(
-              accessToken,
-              adSetTemplate,
-              {
-                campaignId,
-                name: `Ad Set - ${assetName}`,
-                startTime: now,
-                endTime,
-                status: "PAUSED",
-              }
-            );
-
-            const creativeId = await metaApiService.createAdCreativeFromTemplate(
-              accessToken,
-              creativeTemplate,
-              {
-                name: `Creative - ${assetName}`,
-                videoId,
-              }
-            );
-
-            const adId = await metaApiService.createAdFromCreative(accessToken, {
-              name: `Ad - ${assetName}`,
-              adSetId,
-              creativeId,
-              status: "PAUSED",
-            });
-
-            assetResults.push({
-              assetName,
-              videoId,
-              adSetId,
-              creativeId,
-              adId,
-            });
-          } catch (assetError: any) {
-            assetResults.push({
-              assetName,
-              error: assetError instanceof Error ? assetError.message : String(assetError),
-            });
-          } finally {
-            if (downloadedTemp && localVideoPath && fs.existsSync(localVideoPath)) {
-              try {
-                fs.unlinkSync(localVideoPath);
-              } catch (cleanupError) {
-                console.warn(`Failed to clean up temporary download: ${localVideoPath}`, cleanupError);
-              }
-            }
-          }
-        }
-
-        console.log(`[Meta Automation] SUCCESS - Campaign created: ${campaignId}`);
-        console.log(`[Meta Automation] Asset results:`, assetResults);
-        metaAutomationResult = {
-          market: normalizedMarket,
-          campaignId,
-          assetResults,
-        };
-      } catch (metaError: any) {
-        console.error("[Meta Automation] FAILED:", metaError.message);
-        console.error("[Meta Automation] Full error:", metaError);
-        metaAutomationResult = {
-          market: normalizeMetaMarket(metaMarket) || metaMarket || 'UK',
-          error: metaError instanceof Error ? metaError.message : String(metaError),
-        };
-        console.error("Meta automation failed:", metaError);
-      }
+      // Collect asset info for later Meta upload (3-stage workflow)
+      const assetsForMetaUpload = scriptsWithVideos
+        .filter((script: any) => script.videoFileId)
+        .map((script: any) => ({
+          fileName: script.fileName || script.title,
+          videoFileId: script.videoFileId,
+          driveLink: script.videoUrl || script.folderLink,
+        }));
+      
+      console.log(`[Video Creation] Created ${assetsForMetaUpload.length} video assets ready for Meta upload`);
 
       // Send to Slack if requested
       if (sendToSlack) {
@@ -2119,13 +1978,23 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           });
         }
 
+        // Recompute assets with updated Drive file IDs
+        const assetsWithDriveIds = scriptsWithDriveLinks
+          .filter((script: any) => script.videoFileId)
+          .map((script: any) => ({
+            fileName: script.fileName || script.title,
+            videoFileId: script.videoFileId,
+            driveLink: script.videoUrl || script.folderLink,
+          }));
+
         res.json({
           success: true,
           processedCount: scriptsWithVideos.length,
           videosGenerated: scriptsWithVideos.filter(s => s.videoUrl).length,
           sentToSlack: true,
           driveFolder: driveFolder.webViewLink,
-          meta: metaAutomationResult,
+          assetsForMetaUpload: assetsWithDriveIds,
+          metaMarket: normalizeMetaMarket(metaMarket) || 'UK',
           message: `Processed ${scriptsWithVideos.length} scripts successfully`
         });
       } else {
@@ -2134,7 +2003,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           processedCount: scriptsWithVideos.length,
           videosGenerated: scriptsWithVideos.filter(s => s.videoUrl).length,
           scripts: scriptsWithVideos,
-          meta: metaAutomationResult,
+          assetsForMetaUpload,
+          metaMarket: normalizeMetaMarket(metaMarket) || 'UK',
           message: `Processed ${scriptsWithVideos.length} scripts successfully`
         });
       }
@@ -3021,6 +2891,209 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       res.status(500).json({ 
         error: error.message || 'Failed to upload to Meta' 
       });
+    }
+  });
+
+  // Batch upload assets to Meta (Stage 2 of 3-stage workflow)
+  app.post('/api/meta/upload-batch', async (req, res) => {
+    try {
+      const accessToken = await getAccessToken();
+      const { assets } = req.body;
+      
+      if (!assets || !Array.isArray(assets) || assets.length === 0) {
+        return res.status(400).json({ error: 'assets array is required' });
+      }
+      
+      if (!googleDriveService.isConfigured()) {
+        return res.status(503).json({ error: 'Google Drive service is not configured' });
+      }
+      
+      console.log(`[Meta Batch Upload] Starting upload of ${assets.length} assets`);
+      
+      const uploadResults: any[] = [];
+      
+      for (let i = 0; i < assets.length; i++) {
+        const asset = assets[i];
+        const fileName = asset.fileName || `video_${i + 1}`;
+        const videoFileId = asset.videoFileId;
+        
+        try {
+          console.log(`[Meta Batch Upload] Uploading ${fileName}...`);
+          
+          // Download from Google Drive
+          const downloadResult = await googleDriveService.downloadVideoFile(videoFileId, `${fileName}.mp4`);
+          if (!downloadResult.success || !downloadResult.filePath) {
+            throw new Error(downloadResult.error || 'Failed to download from Drive');
+          }
+          
+          // Upload to Meta
+          const metaResult = await fileService.uploadFileToMeta(accessToken, downloadResult.filePath);
+          
+          // Clean up temp file
+          try {
+            fs.unlinkSync(downloadResult.filePath);
+          } catch (cleanupError) {
+            console.warn('Failed to cleanup temp file:', cleanupError);
+          }
+          
+          console.log(`[Meta Batch Upload] Successfully uploaded ${fileName} as Meta ID: ${metaResult.id}`);
+          
+          uploadResults.push({
+            fileName,
+            videoFileId,
+            metaVideoId: metaResult.id,
+            success: true
+          });
+        } catch (assetError: any) {
+          console.error(`[Meta Batch Upload] Failed to upload ${fileName}:`, assetError.message);
+          uploadResults.push({
+            fileName,
+            videoFileId,
+            error: assetError.message,
+            success: false
+          });
+        }
+      }
+      
+      const successCount = uploadResults.filter(r => r.success).length;
+      console.log(`[Meta Batch Upload] Completed: ${successCount}/${assets.length} successful`);
+      
+      res.json({
+        success: successCount > 0,
+        uploadResults,
+        successCount,
+        totalCount: assets.length,
+        message: `Uploaded ${successCount}/${assets.length} assets to Meta`
+      });
+    } catch (error: any) {
+      console.error('[Meta Batch Upload] Error:', error);
+      res.status(500).json({ error: error.message || 'Failed to upload assets to Meta' });
+    }
+  });
+
+  // Create campaign with uploaded assets (Stage 3 of 3-stage workflow)
+  app.post('/api/meta/create-campaign', async (req, res) => {
+    try {
+      const accessToken = await getAccessToken();
+      const { uploadedAssets, metaMarket } = req.body;
+      
+      if (!uploadedAssets || !Array.isArray(uploadedAssets) || uploadedAssets.length === 0) {
+        return res.status(400).json({ error: 'uploadedAssets array is required' });
+      }
+      
+      const normalizedMarket = normalizeMetaMarket(metaMarket) || 'UK';
+      const templateIds = getMetaTemplateIds(normalizedMarket);
+      
+      if (!templateIds.campaignId || !templateIds.adSetId || !templateIds.adId) {
+        return res.status(400).json({ error: `Missing Meta template IDs for market ${normalizedMarket}` });
+      }
+      
+      console.log(`[Meta Campaign] Creating campaign for market: ${normalizedMarket}`);
+      
+      const now = new Date();
+      const endTime = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const timestamp = now.toISOString().replace(/[:.]/g, "-");
+      const campaignName = `Auto ${normalizedMarket} ${timestamp}`;
+      
+      // Create campaign
+      const campaignId = await metaApiService.createCampaignFromTemplate(
+        accessToken,
+        templateIds.campaignId,
+        {
+          name: campaignName,
+          startTime: now,
+          endTime,
+          status: "PAUSED",
+        }
+      );
+      
+      console.log(`[Meta Campaign] Created campaign: ${campaignId}`);
+      
+      // Get templates for ad set and creative
+      const adSetTemplate = await metaApiService.getAdSetTemplate(accessToken, templateIds.adSetId);
+      const creativeTemplate = await metaApiService.getAdCreativeTemplateFromAd(accessToken, templateIds.adId);
+      
+      const adResults: any[] = [];
+      
+      for (const asset of uploadedAssets) {
+        const { fileName, metaVideoId } = asset;
+        
+        if (!metaVideoId) {
+          adResults.push({ fileName, error: 'No Meta video ID' });
+          continue;
+        }
+        
+        try {
+          console.log(`[Meta Campaign] Creating ad for ${fileName}...`);
+          
+          // Create ad set
+          const adSetId = await metaApiService.createAdSetFromTemplate(
+            accessToken,
+            adSetTemplate,
+            {
+              campaignId,
+              name: `Ad Set - ${fileName}`,
+              startTime: now,
+              endTime,
+              status: "PAUSED",
+            }
+          );
+          
+          // Create creative
+          const creativeId = await metaApiService.createAdCreativeFromTemplate(
+            accessToken,
+            creativeTemplate,
+            {
+              name: `Creative - ${fileName}`,
+              videoId: metaVideoId,
+            }
+          );
+          
+          // Create ad
+          const adId = await metaApiService.createAdFromCreative(accessToken, {
+            name: `Ad - ${fileName}`,
+            adSetId,
+            creativeId,
+            status: "PAUSED",
+          });
+          
+          console.log(`[Meta Campaign] Created ad ${adId} for ${fileName}`);
+          
+          adResults.push({
+            fileName,
+            metaVideoId,
+            adSetId,
+            creativeId,
+            adId,
+            success: true
+          });
+        } catch (adError: any) {
+          console.error(`[Meta Campaign] Failed to create ad for ${fileName}:`, adError.message);
+          adResults.push({
+            fileName,
+            metaVideoId,
+            error: adError.message,
+            success: false
+          });
+        }
+      }
+      
+      const successCount = adResults.filter(r => r.success).length;
+      console.log(`[Meta Campaign] Completed: ${successCount}/${uploadedAssets.length} ads created`);
+      
+      res.json({
+        success: successCount > 0,
+        campaignId,
+        campaignName,
+        market: normalizedMarket,
+        adResults,
+        successCount,
+        totalCount: uploadedAssets.length,
+        message: `Created campaign with ${successCount}/${uploadedAssets.length} ads`
+      });
+    } catch (error: any) {
+      console.error('[Meta Campaign] Error:', error);
+      res.status(500).json({ error: error.message || 'Failed to create campaign' });
     }
   });
 

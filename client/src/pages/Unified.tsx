@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, Zap, Calendar, CheckCircle, Upload, Video, RefreshCw, FileText } from 'lucide-react';
+import { Loader2, Zap, Calendar, CheckCircle, Upload, Video, RefreshCw, FileText, Play } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { useMetaAuth } from '@/hooks/useMetaAuth';
@@ -87,6 +87,13 @@ export default function Unified() {
   const [selectedScriptBatchId, setSelectedScriptBatchId] = useState('');
   const [selectedScriptIds, setSelectedScriptIds] = useState<Set<string>>(new Set());
   const [isLoadingScriptDatabase, setIsLoadingScriptDatabase] = useState(false);
+  
+  // States for 3-stage Meta workflow
+  const [batchAssets, setBatchAssets] = useState<{fileName: string, videoFileId: string, driveLink?: string}[]>([]);
+  const [batchMetaMarket, setBatchMetaMarket] = useState<string>('');
+  const [uploadedAssets, setUploadedAssets] = useState<{fileName: string, metaVideoId: string}[]>([]);
+  const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
+  const [campaignResult, setCampaignResult] = useState<any>(null);
   
   // States for iterations tab
   const [iterationsCount, setIterationsCount] = useState(3);
@@ -310,6 +317,10 @@ export default function Unified() {
     }
 
     setIsProcessingScripts(true);
+    // Reset 3-stage workflow state for new batch
+    setBatchAssets([]);
+    setUploadedAssets([]);
+    setCampaignResult(null);
     try {
       // Get selected scripts from Script_Database
       const scriptsToProcess = scriptDatabaseEntries
@@ -345,25 +356,20 @@ export default function Unified() {
       if (response.ok) {
         const result = await response.json();
         toast({
-          title: "Scripts processed successfully",
+          title: "Videos created successfully",
           description: result.message,
         });
 
-        if (result.meta?.error) {
+        // Store batch assets for 3-stage workflow
+        if (result.assetsForMetaUpload && result.assetsForMetaUpload.length > 0) {
+          setBatchAssets(result.assetsForMetaUpload);
+          setBatchMetaMarket(result.metaMarket || 'UK');
+          setUploadedAssets([]);
+          setCampaignResult(null);
           toast({
-            title: "Meta automation failed",
-            description: result.meta.error,
-            variant: "destructive"
+            title: "Ready for Meta upload",
+            description: `${result.assetsForMetaUpload.length} video(s) ready. Click 'Upload to Meta' when ready.`,
           });
-        } else if (Array.isArray(result.meta?.assetResults)) {
-          const failedAssets = result.meta.assetResults.filter((asset: any) => asset.error);
-          if (failedAssets.length > 0) {
-            toast({
-              title: "Meta automation partial failure",
-              description: `${failedAssets.length} asset${failedAssets.length === 1 ? '' : 's'} failed to publish`,
-              variant: "destructive"
-            });
-          }
         }
         
         // Reset selection
@@ -385,6 +391,126 @@ export default function Unified() {
       });
     } finally {
       setIsProcessingScripts(false);
+    }
+  };
+
+  // Stage 2: Upload batch assets to Meta
+  const handleUploadToMeta = async () => {
+    if (batchAssets.length === 0) {
+      toast({
+        title: "No assets to upload",
+        description: "Process scripts to videos first",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsUploadingToMeta(true);
+    try {
+      const response = await fetch('/api/meta/upload-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assets: batchAssets })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const successfulUploads = result.uploadResults.filter((r: any) => r.success);
+        setUploadedAssets(successfulUploads.map((r: any) => ({
+          fileName: r.fileName,
+          metaVideoId: r.metaVideoId
+        })));
+
+        if (result.successCount > 0) {
+          toast({
+            title: "Upload successful",
+            description: `${result.successCount}/${result.totalCount} videos uploaded to Meta. Click 'Create Campaign' to proceed.`,
+          });
+        } else {
+          toast({
+            title: "Upload failed",
+            description: "No videos were uploaded to Meta",
+            variant: "destructive"
+          });
+        }
+      } else {
+        const error = await response.json();
+        toast({
+          title: "Upload failed",
+          description: error.error || "Failed to upload to Meta",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('Error uploading to Meta:', error);
+      toast({
+        title: "Error",
+        description: "Failed to upload assets to Meta",
+        variant: "destructive"
+      });
+    } finally {
+      setIsUploadingToMeta(false);
+    }
+  };
+
+  // Stage 3: Create campaign with uploaded assets
+  const handleCreateCampaign = async () => {
+    if (uploadedAssets.length === 0) {
+      toast({
+        title: "No uploaded assets",
+        description: "Upload videos to Meta first",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsCreatingCampaign(true);
+    try {
+      const response = await fetch('/api/meta/create-campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          uploadedAssets, 
+          metaMarket: batchMetaMarket || metaMarket 
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setCampaignResult(result);
+
+        if (result.success) {
+          toast({
+            title: "Campaign created",
+            description: `Created campaign with ${result.successCount} ads. Campaign ID: ${result.campaignId}`,
+          });
+          // Clear batch state after successful campaign creation
+          setBatchAssets([]);
+          setUploadedAssets([]);
+        } else {
+          toast({
+            title: "Campaign creation failed",
+            description: result.error || "Failed to create campaign",
+            variant: "destructive"
+          });
+        }
+      } else {
+        const error = await response.json();
+        toast({
+          title: "Campaign creation failed",
+          description: error.error || "Failed to create campaign",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('Error creating campaign:', error);
+      toast({
+        title: "Error",
+        description: "Failed to create Meta campaign",
+        variant: "destructive"
+      });
+    } finally {
+      setIsCreatingCampaign(false);
     }
   };
 
@@ -1938,6 +2064,74 @@ export default function Unified() {
                     </>
                   )}
                 </Button>
+              </div>
+            )}
+
+            {/* 3-Stage Meta Workflow Buttons */}
+            {batchAssets.length > 0 && (
+              <div className="pt-4 border-t space-y-3">
+                <div className="text-sm font-medium text-gray-700">
+                  Stage 2: {batchAssets.length} video(s) ready for Meta upload
+                </div>
+                <Button
+                  onClick={handleUploadToMeta}
+                  disabled={isUploadingToMeta || batchAssets.length === 0}
+                  className="w-full"
+                  variant="secondary"
+                >
+                  {isUploadingToMeta ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Uploading to Meta...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Upload {batchAssets.length} Video{batchAssets.length !== 1 ? 's' : ''} to Meta
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+
+            {uploadedAssets.length > 0 && (
+              <div className="pt-4 border-t space-y-3">
+                <div className="text-sm font-medium text-gray-700">
+                  Stage 3: {uploadedAssets.length} video(s) uploaded to Meta
+                </div>
+                <Button
+                  onClick={handleCreateCampaign}
+                  disabled={isCreatingCampaign || uploadedAssets.length === 0}
+                  className="w-full"
+                  variant="default"
+                >
+                  {isCreatingCampaign ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating Campaign...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="mr-2 h-4 w-4" />
+                      Create Campaign with {uploadedAssets.length} Ad{uploadedAssets.length !== 1 ? 's' : ''}
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+
+            {campaignResult && campaignResult.success && (
+              <div className="pt-4 border-t">
+                <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                  <div className="text-sm font-medium text-green-800">
+                    Campaign Created Successfully
+                  </div>
+                  <div className="text-xs text-green-600 mt-1">
+                    Campaign ID: {campaignResult.campaignId}<br/>
+                    Market: {campaignResult.market}<br/>
+                    Ads Created: {campaignResult.successCount}/{campaignResult.totalCount}
+                  </div>
+                </div>
               </div>
             )}
 
