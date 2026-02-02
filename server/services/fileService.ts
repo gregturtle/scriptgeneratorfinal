@@ -4,6 +4,7 @@ import FormData from "form-data";
 import axios from "axios";
 import * as https from "https";
 import { AdAccount, FacebookAdsApi } from 'facebook-nodejs-business-sdk';
+import { googleDriveService } from "./googleDriveService";
 
 // Facebook Graph API base URL
 const FB_API_VERSION = "v23.0";
@@ -50,6 +51,21 @@ class FileService {
     const forceResumable = ['1', 'true', 'yes'].includes(
       (process.env.META_UPLOAD_RESUMABLE || '').toLowerCase()
     );
+    const forceFileUrl = ['1', 'true', 'yes'].includes(
+      (process.env.META_UPLOAD_FILE_URL || '').toLowerCase()
+    );
+
+    if (forceFileUrl) {
+      console.log("META_UPLOAD_FILE_URL enabled; using file_url upload.");
+      return this.uploadFileToMetaViaUrl({
+        accessToken,
+        filePath,
+        account,
+        videoName,
+        timeoutMs,
+        httpsAgent,
+      });
+    }
 
     if (forceResumable) {
       console.log("META_UPLOAD_RESUMABLE enabled; using resumable upload flow.");
@@ -134,6 +150,17 @@ class FileService {
             });
           } catch (resumableError: any) {
             console.error("Resumable upload also failed:", resumableError?.message || resumableError);
+            if (googleDriveService.isConfigured()) {
+              console.warn("Falling back to file_url upload via Google Drive...");
+              return this.uploadFileToMetaViaUrl({
+                accessToken,
+                filePath,
+                account,
+                videoName,
+                timeoutMs,
+                httpsAgent,
+              });
+            }
             throw resumableError;
           }
         }
@@ -153,6 +180,57 @@ class FileService {
     }
     
     throw lastError || new Error('Upload failed after all retries');
+  }
+
+  private async uploadFileToMetaViaUrl(params: {
+    accessToken: string;
+    filePath: string;
+    account: string;
+    videoName: string;
+    timeoutMs: number;
+    httpsAgent: https.Agent;
+  }): Promise<{ id: string }> {
+    const {
+      accessToken,
+      filePath,
+      account,
+      videoName,
+      timeoutMs,
+      httpsAgent,
+    } = params;
+
+    if (!googleDriveService.isConfigured()) {
+      throw new Error('Google Drive service not configured; cannot use file_url upload');
+    }
+
+    const fileName = `${videoName}${path.extname(filePath) || '.mp4'}`;
+    console.log(`Uploading ${fileName} to Google Drive for file_url upload...`);
+    const uploadResult = await googleDriveService.uploadVideoToFolder(filePath, fileName, 'Meta Upload Staging');
+    const publicInfo = await googleDriveService.makeFilePublic(uploadResult.id);
+    const fileUrl = publicInfo.downloadUrl;
+
+    console.log(`Uploading to Meta via file_url: ${fileUrl}`);
+
+    const payload = new URLSearchParams();
+    payload.append('access_token', accessToken);
+    payload.append('file_url', fileUrl);
+    payload.append('name', videoName);
+
+    const response = await axios.post(`${FB_GRAPH_VIDEO_API}/${account}/advideos`, payload, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      timeout: timeoutMs,
+      httpsAgent,
+    });
+
+    const result = response.data as any;
+    if (!result?.id) {
+      throw new Error(`Meta file_url upload failed: ${JSON.stringify(result)}`);
+    }
+
+    console.log(`file_url upload successful. Video ID: ${result.id}`);
+    return { id: result.id };
   }
 
   private async uploadFileToMetaResumable(params: {

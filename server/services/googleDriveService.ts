@@ -723,6 +723,43 @@ class GoogleDriveService {
   }
 
   /**
+   * Make a file publicly readable and return a direct download URL.
+   */
+  async makeFilePublic(fileId: string): Promise<{ webViewLink?: string; downloadUrl: string }> {
+    if (!this.isConfigured()) {
+      throw new Error('Google Drive service not configured');
+    }
+
+    try {
+      await this.drive.permissions.create({
+        fileId,
+        requestBody: {
+          role: 'reader',
+          type: 'anyone',
+          allowFileDiscovery: false,
+        },
+        supportsAllDrives: true,
+      });
+
+      const fileResponse = await this.drive.files.get({
+        fileId,
+        fields: 'id, webViewLink, webContentLink',
+        supportsAllDrives: true,
+      });
+
+      const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+      return {
+        webViewLink: fileResponse.data.webViewLink,
+        downloadUrl,
+      };
+    } catch (error) {
+      console.error('Error making Google Drive file public:', error);
+      throw new Error(`Failed to make file public: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
    * Delete a file from Google Drive
    */
   async deleteFile(fileId: string): Promise<{ success: boolean; error?: string; alreadyDeleted?: boolean }> {
