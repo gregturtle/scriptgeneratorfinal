@@ -61,28 +61,46 @@ class FileService {
       // Use the SDK to create an AdVideo
       console.log('Using Facebook SDK for video upload...');
       const adAccount = new AdAccount(adAccountId);
-      
-      // Read file as buffer for the SDK
-      const fileBuffer = fs.readFileSync(filePath);
       const fileName = path.basename(filePath);
       
       console.log(`Uploading ${fileName} via SDK to ${adAccountId}...`);
       
-      // Create video using SDK
-      const videoParams = {
-        source: fileBuffer,
+      // Create video using SDK with filepath (not buffer)
+      // The SDK expects 'filepath' parameter for local files
+      const videoParams: Record<string, any> = {
         title: fileName.replace('.mp4', ''),
+        filepath: filePath,
       };
       
-      const result = await adAccount.createAdVideo([], videoParams);
-      const videoId = result._data?.id || result.id;
-      
-      if (!videoId) {
-        throw new Error('Video upload succeeded but no ID returned');
+      try {
+        const result = await adAccount.createAdVideo([], videoParams);
+        const videoId = result._data?.id || result.id;
+        
+        if (!videoId) {
+          throw new Error('Video upload succeeded but no ID returned');
+        }
+        
+        console.log(`Upload successful via SDK. Received ID: ${videoId}`);
+        return { id: videoId };
+      } catch (sdkError: any) {
+        console.error('SDK upload failed, trying alternative method...', sdkError.message);
+        
+        // Fallback: Try using source_file parameter
+        const altParams: Record<string, any> = {
+          title: fileName.replace('.mp4', ''),
+          source_file: filePath,
+        };
+        
+        const altResult = await adAccount.createAdVideo([], altParams);
+        const altVideoId = altResult._data?.id || altResult.id;
+        
+        if (!altVideoId) {
+          throw new Error('Video upload succeeded but no ID returned');
+        }
+        
+        console.log(`Upload successful via SDK (alt method). Received ID: ${altVideoId}`);
+        return { id: altVideoId };
       }
-      
-      console.log(`Upload successful via SDK. Received ID: ${videoId}`);
-      return { id: videoId };
 
     } catch (error) {
       console.error("Error uploading file to Meta:", error);
