@@ -4,7 +4,7 @@ import FormData from "form-data";
 import { AdAccount, FacebookAdsApi } from 'facebook-nodejs-business-sdk';
 
 // Facebook Graph API base URL
-const FB_API_VERSION = "v18.0";
+const FB_API_VERSION = "v23.0";
 const FB_GRAPH_API = `https://graph.facebook.com/${FB_API_VERSION}`;
 
 // Get ad account ID from environment variable
