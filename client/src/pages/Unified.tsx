@@ -108,6 +108,7 @@ export default function Unified() {
   const [isLoadingMetaVideos, setIsLoadingMetaVideos] = useState(false);
   const [isUploadingToMeta, setIsUploadingToMeta] = useState(false);
   const [metaUploadProgress, setMetaUploadProgress] = useState<{current: number, total: number, currentVideo?: string}>({current: 0, total: 0});
+  const [metaMarket, setMetaMarket] = useState<'UK' | 'IN' | 'DE' | 'US'>('UK');
 
   // States for base asset form - shared fields that apply to all entries
   const [sharedAssetType, setSharedAssetType] = useState('');
@@ -336,7 +337,8 @@ export default function Unified() {
           sendToSlack: slackEnabled,
           slackNotificationDelay: slackEnabled ? 15 : 0, // 15 minute delay if Slack is enabled
           includeSubtitles: includeSubtitles,
-          spreadsheetId: spreadsheetId
+          spreadsheetId: spreadsheetId,
+          metaMarket: metaMarket
         })
       });
 
@@ -346,6 +348,23 @@ export default function Unified() {
           title: "Scripts processed successfully",
           description: result.message,
         });
+
+        if (result.meta?.error) {
+          toast({
+            title: "Meta automation failed",
+            description: result.meta.error,
+            variant: "destructive"
+          });
+        } else if (Array.isArray(result.meta?.assetResults)) {
+          const failedAssets = result.meta.assetResults.filter((asset: any) => asset.error);
+          if (failedAssets.length > 0) {
+            toast({
+              title: "Meta automation partial failure",
+              description: `${failedAssets.length} asset${failedAssets.length === 1 ? '' : 's'} failed to publish`,
+              variant: "destructive"
+            });
+          }
+        }
         
         // Reset selection
         setSelectedScriptIds(new Set());
@@ -1862,6 +1881,26 @@ export default function Unified() {
                 </Label>
               </div>
             )}
+
+            {/* Meta Market Selection */}
+            <div className="space-y-2">
+              <Label htmlFor="meta-market-selector">Meta Market</Label>
+              <Select value={metaMarket} onValueChange={(value) => setMetaMarket(value as 'UK' | 'IN' | 'DE' | 'US')}>
+                <SelectTrigger id="meta-market-selector">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="max-h-60 overflow-y-auto">
+                  {['UK', 'IN', 'DE', 'US'].map((market) => (
+                    <SelectItem key={market} value={market}>
+                      {market}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">
+                Creates a new paused campaign from the market template and adds one ad set per asset.
+              </p>
+            </div>
 
             {/* Slack Toggle */}
             <div className="flex items-center justify-between">

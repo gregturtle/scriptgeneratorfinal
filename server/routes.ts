@@ -15,6 +15,7 @@ import {
   insertCreativeSchema
 } from "@shared/schema";
 import { metaApiService } from "./services/metaApi";
+import { getMetaTemplateIds, normalizeMetaMarket } from "./metaTemplates";
 import { fileService } from "./services/fileService";
 import { performanceReportService } from "./services/performanceReportService";
 import { aiScriptService } from "./services/aiScriptService";
@@ -1715,7 +1716,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         sendToSlack,
         slackNotificationDelay = 0,
         includeSubtitles = false,
-        spreadsheetId
+        spreadsheetId,
+        metaMarket
       } = req.body;
       
       if (!scripts || !Array.isArray(scripts)) {
@@ -1901,6 +1903,138 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       
       let scriptsWithVideos = allScriptsWithVideos;
 
+      let metaAutomationResult: any = null;
+      const normalizedMarket = normalizeMetaMarket(metaMarket) || 'UK';
+
+      try {
+        const templateIds = getMetaTemplateIds(normalizedMarket);
+        if (!templateIds.campaignId || !templateIds.adSetId || !templateIds.adId) {
+          throw new Error(`Missing Meta template IDs for market ${normalizedMarket}`);
+        }
+
+        const assetsForMeta = scriptsWithVideos.filter(
+          (script: any) => script.videoFile || script.videoFileId
+        );
+
+        if (assetsForMeta.length === 0) {
+          throw new Error("No video assets available for Meta upload");
+        }
+
+        const accessToken = await getAccessToken();
+        const now = new Date();
+        const endTime = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const timestamp = now.toISOString().replace(/[:.]/g, "-");
+        const campaignName = `Auto ${normalizedMarket} ${timestamp}`;
+
+        const campaignId = await metaApiService.createCampaignFromTemplate(
+          accessToken,
+          templateIds.campaignId,
+          {
+            name: campaignName,
+            startTime: now,
+            endTime,
+            status: "PAUSED",
+          }
+        );
+
+        const adSetTemplate = await metaApiService.getAdSetTemplate(accessToken, templateIds.adSetId);
+        const creativeTemplate = await metaApiService.getAdCreativeTemplateFromAd(accessToken, templateIds.adId);
+
+        const assetResults: any[] = [];
+
+        for (let i = 0; i < assetsForMeta.length; i++) {
+          const asset = assetsForMeta[i];
+          const assetName = asset.fileName || asset.title || `Asset ${i + 1}`;
+          let localVideoPath = asset.videoFile;
+          let downloadedTemp = false;
+
+          try {
+            if (!localVideoPath || !fs.existsSync(localVideoPath)) {
+              if (asset.videoFileId && googleDriveService.isConfigured()) {
+                const downloadResult = await googleDriveService.downloadVideoFile(
+                  asset.videoFileId,
+                  `${assetName}.mp4`
+                );
+                if (!downloadResult.success || !downloadResult.filePath) {
+                  throw new Error(downloadResult.error || "Failed to download video from Google Drive");
+                }
+                localVideoPath = downloadResult.filePath;
+                downloadedTemp = true;
+              } else {
+                throw new Error("Local video file missing and Google Drive download unavailable");
+              }
+            }
+
+            const videoId = await metaApiService.uploadVideoWithSDK(
+              accessToken,
+              localVideoPath,
+              assetName
+            );
+
+            const adSetId = await metaApiService.createAdSetFromTemplate(
+              accessToken,
+              adSetTemplate,
+              {
+                campaignId,
+                name: `Ad Set - ${assetName}`,
+                startTime: now,
+                endTime,
+                status: "PAUSED",
+              }
+            );
+
+            const creativeId = await metaApiService.createAdCreativeFromTemplate(
+              accessToken,
+              creativeTemplate,
+              {
+                name: `Creative - ${assetName}`,
+                videoId,
+              }
+            );
+
+            const adId = await metaApiService.createAdFromCreative(accessToken, {
+              name: `Ad - ${assetName}`,
+              adSetId,
+              creativeId,
+              status: "PAUSED",
+            });
+
+            assetResults.push({
+              assetName,
+              videoId,
+              adSetId,
+              creativeId,
+              adId,
+            });
+          } catch (assetError: any) {
+            assetResults.push({
+              assetName,
+              error: assetError instanceof Error ? assetError.message : String(assetError),
+            });
+          } finally {
+            if (downloadedTemp && localVideoPath && fs.existsSync(localVideoPath)) {
+              try {
+                fs.unlinkSync(localVideoPath);
+              } catch (cleanupError) {
+                console.warn(`Failed to clean up temporary download: ${localVideoPath}`, cleanupError);
+              }
+            }
+          }
+        }
+
+        metaAutomationResult = {
+          market: normalizedMarket,
+          campaignId,
+          assetResults,
+        };
+      } catch (metaError: any) {
+        metaAutomationResult = {
+          market: normalizeMetaMarket(metaMarket) || metaMarket || 'UK',
+          error: metaError instanceof Error ? metaError.message : String(metaError),
+        };
+        console.error("Meta automation failed:", metaError);
+      }
+
       // Send to Slack if requested
       if (sendToSlack) {
         const timestamp = new Date().toISOString();
@@ -1971,6 +2105,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           videosGenerated: scriptsWithVideos.filter(s => s.videoUrl).length,
           sentToSlack: true,
           driveFolder: driveFolder.webViewLink,
+          meta: metaAutomationResult,
           message: `Processed ${scriptsWithVideos.length} scripts successfully`
         });
       } else {
@@ -1979,6 +2114,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           processedCount: scriptsWithVideos.length,
           videosGenerated: scriptsWithVideos.filter(s => s.videoUrl).length,
           scripts: scriptsWithVideos,
+          meta: metaAutomationResult,
           message: `Processed ${scriptsWithVideos.length} scripts successfully`
         });
       }

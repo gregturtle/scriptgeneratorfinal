@@ -25,6 +25,37 @@ const PERMISSIONS = [
   "pages_read_engagement",
 ];
 
+const META_STATUS_PAUSED = "PAUSED";
+
+function stripUndefined<T extends Record<string, any>>(payload: T): Partial<T> {
+  const cleaned: Record<string, any> = {};
+  Object.entries(payload).forEach(([key, value]) => {
+    if (value !== undefined) {
+      cleaned[key] = value;
+    }
+  });
+  return cleaned as Partial<T>;
+}
+
+function replaceVideoIds(value: any, videoId: string): number {
+  if (Array.isArray(value)) {
+    return value.reduce((total, entry) => total + replaceVideoIds(entry, videoId), 0);
+  }
+  if (value && typeof value === "object") {
+    let replaced = 0;
+    Object.entries(value).forEach(([key, entry]) => {
+      if (key === "video_id") {
+        (value as any)[key] = videoId;
+        replaced += 1;
+      } else {
+        replaced += replaceVideoIds(entry, videoId);
+      }
+    });
+    return replaced;
+  }
+  return 0;
+}
+
 class MetaApiService {
   /**
    * Generate the login URL for Meta OAuth
@@ -88,6 +119,276 @@ class MetaApiService {
 
     const data = await response.json() as any;
     return data.data.map((account: any) => account.id);
+  }
+
+  private normalizeAdAccountId(adAccountId: string): string {
+    if (!adAccountId) return adAccountId;
+    return adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+  }
+
+  private async resolveAdAccountId(accessToken: string): Promise<string> {
+    let adAccountId = META_AD_ACCOUNT_ID;
+    if (!adAccountId) {
+      const adAccounts = await this.getAdAccounts(accessToken);
+      if (adAccounts.length === 0) {
+        throw new Error("No ad accounts found for this user");
+      }
+      adAccountId = adAccounts[0];
+    }
+    return this.normalizeAdAccountId(adAccountId);
+  }
+
+  async getCampaignTemplate(accessToken: string, campaignId: string): Promise<any> {
+    const fields = [
+      "id",
+      "name",
+      "objective",
+      "special_ad_categories",
+      "buying_type",
+      "status"
+    ].join(",");
+    const response = await fetch(
+      `${FB_GRAPH_API}/${campaignId}?fields=${fields}&access_token=${accessToken}`,
+      { method: "GET" }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to fetch campaign template: ${errorText}`);
+    }
+
+    return response.json();
+  }
+
+  async getAdSetTemplate(accessToken: string, adSetId: string): Promise<any> {
+    const fields = [
+      "id",
+      "name",
+      "billing_event",
+      "optimization_goal",
+      "bid_amount",
+      "bid_strategy",
+      "daily_budget",
+      "lifetime_budget",
+      "targeting",
+      "promoted_object",
+      "attribution_spec",
+      "destination_type",
+      "optimization_sub_event",
+      "is_dynamic_creative",
+      "adset_schedule",
+      "pacing_type",
+      "use_new_app_click"
+    ].join(",");
+
+    const response = await fetch(
+      `${FB_GRAPH_API}/${adSetId}?fields=${fields}&access_token=${accessToken}`,
+      { method: "GET" }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to fetch ad set template: ${errorText}`);
+    }
+
+    return response.json();
+  }
+
+  async getAdCreativeTemplateFromAd(accessToken: string, adId: string): Promise<any> {
+    const fields = [
+      "id",
+      "name",
+      "creative{object_story_spec,asset_feed_spec,story_spec,name}"
+    ].join(",");
+
+    const response = await fetch(
+      `${FB_GRAPH_API}/${adId}?fields=${fields}&access_token=${accessToken}`,
+      { method: "GET" }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to fetch ad template: ${errorText}`);
+    }
+
+    const data = await response.json() as any;
+    return data.creative;
+  }
+
+  async createCampaignFromTemplate(
+    accessToken: string,
+    templateCampaignId: string,
+    options: { name: string; startTime: Date; endTime: Date; status?: string }
+  ): Promise<string> {
+    const template = await this.getCampaignTemplate(accessToken, templateCampaignId);
+    const adAccountId = await this.resolveAdAccountId(accessToken);
+
+    const payload = stripUndefined({
+      name: options.name,
+      objective: template.objective,
+      buying_type: template.buying_type,
+      special_ad_categories: template.special_ad_categories ?? [],
+      status: options.status ?? META_STATUS_PAUSED,
+      start_time: options.startTime.toISOString(),
+      end_time: options.endTime.toISOString(),
+    });
+
+    const response = await fetch(
+      `${FB_GRAPH_API}/${adAccountId}/campaigns?access_token=${accessToken}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create campaign: ${errorText}`);
+    }
+
+    const result = await response.json() as any;
+    return result.id as string;
+  }
+
+  async createAdSetFromTemplate(
+    accessToken: string,
+    templateAdSet: any,
+    options: { campaignId: string; name: string; startTime: Date; endTime: Date; status?: string }
+  ): Promise<string> {
+    const adAccountId = await this.resolveAdAccountId(accessToken);
+    const budgetPayload: Record<string, any> = {};
+    if (templateAdSet.daily_budget) {
+      budgetPayload.daily_budget = templateAdSet.daily_budget;
+    } else if (templateAdSet.lifetime_budget) {
+      budgetPayload.lifetime_budget = templateAdSet.lifetime_budget;
+    }
+
+    const payload = stripUndefined({
+      name: options.name,
+      campaign_id: options.campaignId,
+      status: options.status ?? META_STATUS_PAUSED,
+      start_time: options.startTime.toISOString(),
+      end_time: options.endTime.toISOString(),
+      billing_event: templateAdSet.billing_event,
+      optimization_goal: templateAdSet.optimization_goal,
+      bid_amount: templateAdSet.bid_amount,
+      bid_strategy: templateAdSet.bid_strategy,
+      targeting: templateAdSet.targeting,
+      promoted_object: templateAdSet.promoted_object,
+      attribution_spec: templateAdSet.attribution_spec,
+      destination_type: templateAdSet.destination_type,
+      optimization_sub_event: templateAdSet.optimization_sub_event,
+      is_dynamic_creative: templateAdSet.is_dynamic_creative,
+      adset_schedule: templateAdSet.adset_schedule,
+      pacing_type: templateAdSet.pacing_type,
+      use_new_app_click: templateAdSet.use_new_app_click,
+      ...budgetPayload,
+    });
+
+    const response = await fetch(
+      `${FB_GRAPH_API}/${adAccountId}/adsets?access_token=${accessToken}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create ad set: ${errorText}`);
+    }
+
+    const result = await response.json() as any;
+    return result.id as string;
+  }
+
+  async createAdCreativeFromTemplate(
+    accessToken: string,
+    templateCreative: any,
+    options: { name: string; videoId: string }
+  ): Promise<string> {
+    const adAccountId = await this.resolveAdAccountId(accessToken);
+
+    if (!templateCreative) {
+      throw new Error("Template creative not found");
+    }
+
+    if (templateCreative.asset_feed_spec && !templateCreative.object_story_spec) {
+      throw new Error("Template creative uses asset_feed_spec which is not supported yet");
+    }
+
+    const baseSpec = templateCreative.object_story_spec || templateCreative.story_spec;
+    if (!baseSpec) {
+      throw new Error("Template creative missing object_story_spec");
+    }
+
+    const specClone = JSON.parse(JSON.stringify(baseSpec));
+    const replacements = replaceVideoIds(specClone, options.videoId);
+    if (replacements === 0) {
+      throw new Error("Template creative does not reference a video_id");
+    }
+
+    const payload = stripUndefined({
+      name: options.name,
+      object_story_spec: specClone,
+    });
+
+    const response = await fetch(
+      `${FB_GRAPH_API}/${adAccountId}/adcreatives?access_token=${accessToken}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create ad creative: ${errorText}`);
+    }
+
+    const result = await response.json() as any;
+    return result.id as string;
+  }
+
+  async createAdFromCreative(
+    accessToken: string,
+    options: { name: string; adSetId: string; creativeId: string; status?: string }
+  ): Promise<string> {
+    const adAccountId = await this.resolveAdAccountId(accessToken);
+    const payload = stripUndefined({
+      name: options.name,
+      adset_id: options.adSetId,
+      creative: { creative_id: options.creativeId },
+      status: options.status ?? META_STATUS_PAUSED,
+    });
+
+    const response = await fetch(
+      `${FB_GRAPH_API}/${adAccountId}/ads?access_token=${accessToken}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create ad: ${errorText}`);
+    }
+
+    const result = await response.json() as any;
+    return result.id as string;
   }
 
   /**
