@@ -27,6 +27,39 @@ const PERMISSIONS = [
 
 const META_STATUS_PAUSED = "PAUSED";
 
+// Map deprecated Meta objectives to new outcome-based objectives
+// See: https://developers.facebook.com/docs/marketing-api/campaign-structure
+const OBJECTIVE_MAPPING: Record<string, string> = {
+  // Old objectives (deprecated) -> New outcome-based objectives
+  'APP_INSTALLS': 'OUTCOME_APP_PROMOTION',
+  'CONVERSIONS': 'OUTCOME_SALES',
+  'LINK_CLICKS': 'OUTCOME_TRAFFIC',
+  'BRAND_AWARENESS': 'OUTCOME_AWARENESS',
+  'REACH': 'OUTCOME_AWARENESS',
+  'VIDEO_VIEWS': 'OUTCOME_AWARENESS',
+  'LEAD_GENERATION': 'OUTCOME_LEADS',
+  'MESSAGES': 'OUTCOME_ENGAGEMENT',
+  'POST_ENGAGEMENT': 'OUTCOME_ENGAGEMENT',
+  'PAGE_LIKES': 'OUTCOME_ENGAGEMENT',
+  // New objectives (already valid)
+  'OUTCOME_APP_PROMOTION': 'OUTCOME_APP_PROMOTION',
+  'OUTCOME_SALES': 'OUTCOME_SALES',
+  'OUTCOME_TRAFFIC': 'OUTCOME_TRAFFIC',
+  'OUTCOME_AWARENESS': 'OUTCOME_AWARENESS',
+  'OUTCOME_LEADS': 'OUTCOME_LEADS',
+  'OUTCOME_ENGAGEMENT': 'OUTCOME_ENGAGEMENT',
+};
+
+function mapToNewObjective(objective: string): string {
+  const mapped = OBJECTIVE_MAPPING[objective];
+  if (mapped) {
+    console.log(`[Meta API] Mapped objective ${objective} -> ${mapped}`);
+    return mapped;
+  }
+  console.warn(`[Meta API] Unknown objective '${objective}', using as-is`);
+  return objective;
+}
+
 function stripUndefined<T extends Record<string, any>>(payload: T): Partial<T> {
   const cleaned: Record<string, any> = {};
   Object.entries(payload).forEach(([key, value]) => {
@@ -223,9 +256,12 @@ class MetaApiService {
     const template = await this.getCampaignTemplate(accessToken, templateCampaignId);
     const adAccountId = await this.resolveAdAccountId(accessToken);
 
+    // Map old objectives to new outcome-based objectives (Meta deprecated old ones)
+    const mappedObjective = mapToNewObjective(template.objective);
+
     const payload = stripUndefined({
       name: options.name,
-      objective: template.objective,
+      objective: mappedObjective,
       buying_type: template.buying_type,
       special_ad_categories: template.special_ad_categories ?? [],
       status: options.status ?? META_STATUS_PAUSED,
