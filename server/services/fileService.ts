@@ -17,94 +17,176 @@ function initFacebookApi(accessToken: string) {
 
 class FileService {
   /**
-   * Upload a file to Meta's asset library using the Facebook SDK
+   * Upload a file to Meta's asset library using chunked/resumable upload for reliability
    */
   async uploadFileToMeta(accessToken: string, filePath: string): Promise<{ id: string }> {
     try {
       console.log(`Starting Meta file upload for: ${filePath}`);
       
-      // Check if file exists
       if (!fs.existsSync(filePath)) {
         throw new Error(`File does not exist at path: ${filePath}`);
       }
       
       const fileStats = fs.statSync(filePath);
-      console.log(`File size: ${fileStats.size} bytes, Last modified: ${fileStats.mtime}`);
+      const fileSize = fileStats.size;
+      const fileSizeMB = fileSize / (1024 * 1024);
+      console.log(`File size: ${fileSizeMB.toFixed(2)} MB`);
       
-      // Use the ad account ID from environment variable if available
       let adAccountId = META_AD_ACCOUNT_ID;
-      console.log(`Using ad account ID: ${adAccountId}`);
-      
-      // Fallback to fetching accounts if no environment variable is set
       if (!adAccountId) {
-        console.log("No ad account ID in environment, fetching from API...");
         const adAccounts = await this.getAdAccounts(accessToken);
         if (adAccounts.length === 0) {
           throw new Error("No ad accounts found for this user");
         }
         adAccountId = adAccounts[0];
-        console.log(`Fetched ad account ID: ${adAccountId}`);
       }
       
-      // Make sure adAccountId format is correct (should start with 'act_')
       if (!adAccountId.startsWith('act_')) {
         adAccountId = `act_${adAccountId}`;
-        console.log(`Formatted ad account ID: ${adAccountId}`);
       }
+      console.log(`Using ad account ID: ${adAccountId}`);
 
-      const fileSizeMB = fileStats.size / (1024 * 1024);
-      console.log(`File size: ${fileSizeMB.toFixed(2)} MB`);
-      
       const fileName = path.basename(filePath);
-      console.log(`Uploading ${fileName} to ${adAccountId} via direct API...`);
       
-      // Use direct form-data upload with access token in URL (not in form body)
-      const formData = new FormData();
-      formData.append('title', fileName.replace('.mp4', ''));
-      formData.append('source', fs.createReadStream(filePath));
-      
-      // Calculate timeout based on file size
-      const timeoutMs = Math.max(120000, 60000 + Math.ceil(fileSizeMB / 5) * 30000);
-      console.log(`Upload timeout: ${timeoutMs / 1000}s`);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-      
-      try {
-        const response = await fetch(
-          `${FB_GRAPH_API}/${adAccountId}/advideos?access_token=${accessToken}`,
-          {
-            method: 'POST',
-            body: formData as any,
-            headers: formData.getHeaders(),
-            signal: controller.signal,
-          }
-        );
-        
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`Upload failed: ${errorText}`);
-          throw new Error(`Failed to upload video: ${errorText}`);
-        }
-        
-        const data = await response.json() as any;
-        console.log(`Upload successful. Video ID: ${data.id}`);
-        return { id: data.id };
-        
-      } catch (uploadError: any) {
-        clearTimeout(timeoutId);
-        if (uploadError.name === 'AbortError') {
-          throw new Error(`Upload timeout after ${timeoutMs / 1000}s`);
-        }
-        throw uploadError;
+      // Use chunked upload for files > 5MB, direct for smaller
+      if (fileSizeMB > 5) {
+        return await this.uploadVideoChunked(accessToken, adAccountId, filePath, fileName, fileSize);
+      } else {
+        return await this.uploadVideoDirect(accessToken, adAccountId, filePath, fileName);
       }
-
     } catch (error) {
       console.error("Error uploading file to Meta:", error);
       throw error;
     }
+  }
+
+  /**
+   * Direct upload for smaller files
+   */
+  private async uploadVideoDirect(accessToken: string, adAccountId: string, filePath: string, fileName: string): Promise<{ id: string }> {
+    console.log(`Using direct upload for ${fileName}`);
+    
+    const formData = new FormData();
+    formData.append('title', fileName.replace('.mp4', ''));
+    formData.append('source', fs.createReadStream(filePath));
+    
+    const response = await fetch(
+      `${FB_GRAPH_API}/${adAccountId}/advideos?access_token=${accessToken}`,
+      {
+        method: 'POST',
+        body: formData as any,
+        headers: formData.getHeaders(),
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Direct upload failed: ${errorText}`);
+    }
+    
+    const data = await response.json() as any;
+    console.log(`Direct upload successful. Video ID: ${data.id}`);
+    return { id: data.id };
+  }
+
+  /**
+   * Chunked/resumable upload for larger files - more reliable
+   */
+  private async uploadVideoChunked(
+    accessToken: string, 
+    adAccountId: string, 
+    filePath: string, 
+    fileName: string,
+    fileSize: number
+  ): Promise<{ id: string }> {
+    console.log(`Using chunked upload for ${fileName} (${(fileSize / (1024*1024)).toFixed(2)} MB)`);
+    
+    // Phase 1: Start - initialize upload session
+    console.log(`[Chunked Upload] Phase 1: Starting upload session...`);
+    const startResponse = await fetch(
+      `${FB_GRAPH_API}/${adAccountId}/advideos?access_token=${accessToken}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          upload_phase: 'start',
+          file_size: fileSize,
+        }),
+      }
+    );
+    
+    if (!startResponse.ok) {
+      const errorText = await startResponse.text();
+      throw new Error(`Chunked upload start failed: ${errorText}`);
+    }
+    
+    const startData = await startResponse.json() as any;
+    const uploadSessionId = startData.upload_session_id;
+    const videoId = startData.video_id;
+    console.log(`[Chunked Upload] Session started. Session ID: ${uploadSessionId}, Video ID: ${videoId}`);
+    
+    // Phase 2: Transfer - upload in 4MB chunks
+    const chunkSize = 4 * 1024 * 1024; // 4MB chunks
+    const fileBuffer = fs.readFileSync(filePath);
+    let startOffset = 0;
+    let chunkNum = 1;
+    const totalChunks = Math.ceil(fileSize / chunkSize);
+    
+    while (startOffset < fileSize) {
+      const endOffset = Math.min(startOffset + chunkSize, fileSize);
+      const chunk = fileBuffer.slice(startOffset, endOffset);
+      
+      console.log(`[Chunked Upload] Phase 2: Uploading chunk ${chunkNum}/${totalChunks} (${startOffset}-${endOffset})`);
+      
+      const formData = new FormData();
+      formData.append('upload_phase', 'transfer');
+      formData.append('upload_session_id', uploadSessionId);
+      formData.append('start_offset', startOffset.toString());
+      formData.append('video_file_chunk', chunk, { filename: fileName });
+      
+      const transferResponse = await fetch(
+        `${FB_GRAPH_API}/${adAccountId}/advideos?access_token=${accessToken}`,
+        {
+          method: 'POST',
+          body: formData as any,
+          headers: formData.getHeaders(),
+        }
+      );
+      
+      if (!transferResponse.ok) {
+        const errorText = await transferResponse.text();
+        throw new Error(`Chunk ${chunkNum} upload failed: ${errorText}`);
+      }
+      
+      const transferData = await transferResponse.json() as any;
+      startOffset = parseInt(transferData.start_offset || endOffset.toString());
+      chunkNum++;
+    }
+    
+    // Phase 3: Finish - finalize upload
+    console.log(`[Chunked Upload] Phase 3: Finishing upload...`);
+    const finishResponse = await fetch(
+      `${FB_GRAPH_API}/${adAccountId}/advideos?access_token=${accessToken}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          upload_phase: 'finish',
+          upload_session_id: uploadSessionId,
+          title: fileName.replace('.mp4', ''),
+        }),
+      }
+    );
+    
+    if (!finishResponse.ok) {
+      const errorText = await finishResponse.text();
+      throw new Error(`Chunked upload finish failed: ${errorText}`);
+    }
+    
+    const finishData = await finishResponse.json() as any;
+    console.log(`[Chunked Upload] Complete. Video ID: ${finishData.video_id || videoId}`);
+    
+    return { id: finishData.video_id || videoId };
   }
 
   /**
