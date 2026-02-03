@@ -33,7 +33,7 @@ Video Generation: Automatic video overlay using fluent-ffmpeg when background vi
   - **Google Gemini 2.5 Pro**: Uses Replit AI credits (no API key needed, uses Replit AI Integrations)
 - **Voice Synthesis**: Uses ElevenLabs API to convert scripts into professional voice recordings.
 - **Video Creation**: Leverages FFmpeg (fluent-ffmpeg) to combine AI voiceovers with background videos, creating complete ad assets.
-- **Google Sheets Integration**: Exports scripts and metadata to timestamped Google Sheets tabs, supporting performance data export with configurable date ranges. All generated scripts are automatically recorded to a central script_database tab in a dedicated Google Sheet (ID: 1elJajodJA1zfzhdlPklw7iTiTaWD11Ij). The script_database uses the following format:
+- **Google Sheets Integration**: Exports scripts and metadata to timestamped Google Sheets tabs, supporting performance data export with configurable date ranges. All generated scripts are automatically recorded to a central script_database tab in a dedicated Google Sheet (ID: 1TLgiPAJVgE9dZgjmv4bn5eN8zKX3VamTzhVgJ2GLKHQ). The script_database uses the following format:
   - Column A: script_batch_id (format: sb00001, sb00002, etc.)
   - Column B: script_id (format: s00001, s00002, etc.)
   - Column C: timestamp (ISO format)
