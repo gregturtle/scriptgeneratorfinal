@@ -1137,7 +1137,8 @@ class GoogleSheetsService {
       const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
       const tabName = 'Campaign_Pausing_Report';
       
-      console.log(`Appending ${adEntries.length} entries to ${tabName}`);
+      console.log(`[Campaign_Pausing_Report] Spreadsheet ID: ${cleanSpreadsheetId}`);
+      console.log(`[Campaign_Pausing_Report] Appending ${adEntries.length} entries to tab: ${tabName}`);
 
       // Build rows with empty columns A, B, C and data in D, E, F
       const rows = adEntries.map(entry => [
@@ -1159,9 +1160,10 @@ class GoogleSheetsService {
         }
       });
 
-      console.log(`Successfully appended ${adEntries.length} entries to ${tabName}`);
-    } catch (error) {
-      console.error('Error appending to Campaign_Pausing_Report:', error);
+      console.log(`[Campaign_Pausing_Report] Successfully appended ${adEntries.length} entries`);
+      console.log(`[Campaign_Pausing_Report] First entry: Campaign=${adEntries[0]?.campaignName}, AdId=${adEntries[0]?.adId}, AdName=${adEntries[0]?.adName}`);
+    } catch (error: any) {
+      console.error('[Campaign_Pausing_Report] Error:', error?.message || error);
       throw error;
     }
   }
