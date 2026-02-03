@@ -57,7 +57,7 @@ export default function Unified() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<ScriptResult | null>(null);
   const [baseDatabaseEntries, setBaseDatabaseEntries] = useState<{ baseId: string; baseTitle?: string; fileLink: string }[]>([]);
-  const [selectedBaseId, setSelectedBaseId] = useState('');
+  const [selectedBaseIds, setSelectedBaseIds] = useState<Set<string>>(new Set());
   const [isLoadingBaseDatabase, setIsLoadingBaseDatabase] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState<string>('I8vyadnJFaMFR0zgn147'); // Default to Hybrid Voice 1
   const [availableVoices, setAvailableVoices] = useState<{voice_id: string, name: string}[]>([]);
@@ -297,20 +297,20 @@ export default function Unified() {
       return;
     }
 
-    if (!selectedBaseId) {
+    if (selectedBaseIds.size === 0) {
       toast({
         title: "Base film required",
-        description: "Please select a Base_ID from Base_Database before processing",
+        description: "Please select at least one Base Film from Base_Database before processing",
         variant: "destructive"
       });
       return;
     }
 
-    const selectedBase = baseDatabaseEntries.find(entry => entry.baseId === selectedBaseId);
-    if (!selectedBase) {
+    const selectedBases = baseDatabaseEntries.filter(entry => selectedBaseIds.has(entry.baseId));
+    if (selectedBases.length === 0) {
       toast({
-        title: "Base film not found",
-        description: "Selected Base_ID was not found in Base_Database. Please choose another.",
+        title: "Base films not found",
+        description: "Selected Base Films were not found in Base_Database. Please choose others.",
         variant: "destructive"
       });
       return;
@@ -333,6 +333,13 @@ export default function Unified() {
           sourceTab: 'Script_Database'
         }));
       
+      // Map selected base films for backend
+      const baseVideos = selectedBases.map(base => ({
+        baseId: base.baseId,
+        baseTitle: base.baseTitle,
+        fileLink: base.fileLink
+      }));
+      
       const response = await fetch('/api/scripts/process-to-videos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -340,11 +347,8 @@ export default function Unified() {
           scripts: scriptsToProcess,
           voiceId: selectedVoice,
           language: selectedLanguage,
-          baseVideo: {
-            baseId: selectedBase.baseId,
-            baseTitle: selectedBase.baseTitle,
-            fileLink: selectedBase.fileLink
-          },
+          baseVideos: baseVideos, // Multiple base videos
+          baseVideo: baseVideos[0], // Keep for backwards compatibility
           sendToSlack: slackEnabled,
           slackNotificationDelay: slackEnabled ? 15 : 0, // 15 minute delay if Slack is enabled
           includeSubtitles: includeSubtitles,
@@ -360,6 +364,16 @@ export default function Unified() {
           description: result.message,
         });
 
+        // Show warning if some base films failed
+        if (result.baseFilmErrors && result.baseFilmErrors.length > 0) {
+          const failedBases = result.baseFilmErrors.map((e: any) => e.baseId).join(', ');
+          toast({
+            title: "Some base films failed",
+            description: `Failed: ${failedBases}. Videos were created with the remaining base films.`,
+            variant: "destructive"
+          });
+        }
+
         // Store batch assets for 3-stage workflow
         if (result.assetsForMetaUpload && result.assetsForMetaUpload.length > 0) {
           setBatchAssets(result.assetsForMetaUpload);
@@ -374,6 +388,7 @@ export default function Unified() {
         
         // Reset selection
         setSelectedScriptIds(new Set());
+        setSelectedBaseIds(new Set());
       } else {
         const error = await response.json();
         toast({
@@ -680,12 +695,16 @@ export default function Unified() {
         const baseFilms = data.baseFilms || [];
         setBaseDatabaseEntries(baseFilms);
         if (baseFilms.length > 0) {
-          const stillValid = baseFilms.some((entry: any) => entry.baseId === selectedBaseId);
-          if (!selectedBaseId || !stillValid) {
-            setSelectedBaseId(baseFilms[0].baseId);
+          // Keep existing selections that are still valid
+          const validIds = new Set(baseFilms.map((entry: any) => entry.baseId));
+          const stillValidSelection = new Set([...selectedBaseIds].filter(id => validIds.has(id)));
+          if (stillValidSelection.size === 0 && baseFilms.length > 0) {
+            setSelectedBaseIds(new Set([baseFilms[0].baseId]));
+          } else {
+            setSelectedBaseIds(stillValidSelection);
           }
         } else {
-          setSelectedBaseId('');
+          setSelectedBaseIds(new Set());
         }
       } else {
         let errorDetails = '';
@@ -696,7 +715,7 @@ export default function Unified() {
           // ignore JSON parse errors
         }
         setBaseDatabaseEntries([]);
-        setSelectedBaseId('');
+        setSelectedBaseIds(new Set());
         toast({
           title: "Failed to load base database",
           description: errorDetails || "Could not read Base_Database tab from Google Sheets",
@@ -1933,35 +1952,67 @@ export default function Unified() {
               </div>
             )}
 
-            {/* Base Film Selection */}
+            {/* Base Film Selection - Multi-select with checkboxes */}
             {spreadsheetId && (
               <div className="space-y-2">
-                <Label htmlFor="base-id-selector">Base Film (Base_Database)</Label>
+                <div className="flex items-center justify-between">
+                  <Label>Base Films (Base_Database)</Label>
+                  {selectedBaseIds.size === 0 
+                    ? <span className="text-xs text-gray-500">No base films selected</span>
+                    : <span className="text-xs text-blue-600 font-medium">{selectedBaseIds.size} base film{selectedBaseIds.size !== 1 ? 's' : ''} selected</span>
+                  }
+                </div>
                 {isLoadingBaseDatabase ? (
                   <div className="flex items-center gap-2 text-sm text-gray-500 p-3 border rounded-md bg-white">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading Base_IDs...
+                    Loading Base Films...
                   </div>
                 ) : baseDatabaseEntries.length > 0 ? (
-                  <Select value={selectedBaseId} onValueChange={setSelectedBaseId}>
-                    <SelectTrigger id="base-id-selector">
-                      <SelectValue placeholder="Select a Base Film" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-60 overflow-y-auto">
-                      {baseDatabaseEntries.map((entry: any) => (
-                        <SelectItem key={entry.baseId} value={entry.baseId}>
-                          {entry.baseId}{entry.baseTitle ? `_${entry.baseTitle}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="border rounded-md p-2 max-h-48 overflow-y-auto space-y-1 bg-white">
+                    <div className="flex items-center gap-2 pb-2 mb-2 border-b sticky top-0 bg-white">
+                      <Checkbox
+                        id="select-all-bases"
+                        checked={baseDatabaseEntries.length > 0 && baseDatabaseEntries.every(entry => selectedBaseIds.has(entry.baseId))}
+                        onCheckedChange={(checked) => {
+                          if (checked === true) {
+                            setSelectedBaseIds(new Set(baseDatabaseEntries.map(e => e.baseId)));
+                          } else {
+                            setSelectedBaseIds(new Set());
+                          }
+                        }}
+                      />
+                      <Label htmlFor="select-all-bases" className="text-sm font-medium cursor-pointer">
+                        {baseDatabaseEntries.every(entry => selectedBaseIds.has(entry.baseId)) ? 'Deselect All' : 'Select All'}
+                      </Label>
+                    </div>
+                    {baseDatabaseEntries.map((entry: any) => (
+                      <div key={entry.baseId} className="flex items-center gap-2 py-1 hover:bg-gray-50 rounded px-1">
+                        <Checkbox
+                          id={`base-${entry.baseId}`}
+                          checked={selectedBaseIds.has(entry.baseId)}
+                          onCheckedChange={(checked) => {
+                            const newSet = new Set(selectedBaseIds);
+                            if (checked === true) {
+                              newSet.add(entry.baseId);
+                            } else {
+                              newSet.delete(entry.baseId);
+                            }
+                            setSelectedBaseIds(newSet);
+                          }}
+                        />
+                        <Label htmlFor={`base-${entry.baseId}`} className="text-sm cursor-pointer flex-1">
+                          {entry.baseId}{entry.baseTitle ? ` - ${entry.baseTitle}` : ''}
+                        </Label>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <div className="text-sm text-amber-700 bg-amber-100 p-3 rounded-md border border-amber-300">
                     No Base_IDs found in Base_Database (requires Base_Id in column A and file_link in column G).
                   </div>
                 )}
                 <p className="text-xs text-gray-500">
-                  Uses the Base_Database tab from your spreadsheet.
+                  Select multiple base films to create video combinations (scripts × base films).
                 </p>
               </div>
             )}
@@ -2048,7 +2099,7 @@ export default function Unified() {
               <div className="pt-4 border-t">
                 <Button
                   onClick={handleProcessExistingScripts}
-                  disabled={isProcessingScripts || selectedScriptIds.size === 0 || !selectedBaseId}
+                  disabled={isProcessingScripts || selectedScriptIds.size === 0 || selectedBaseIds.size === 0}
                   className="w-full"
                   size="lg"
                 >
@@ -2060,7 +2111,7 @@ export default function Unified() {
                   ) : (
                     <>
                       <Video className="mr-2 h-4 w-4" />
-                      Process {selectedScriptIds.size} Script{selectedScriptIds.size !== 1 ? 's' : ''} to Videos
+                      Create {selectedScriptIds.size * selectedBaseIds.size} Video{selectedScriptIds.size * selectedBaseIds.size !== 1 ? 's' : ''} ({selectedScriptIds.size} script{selectedScriptIds.size !== 1 ? 's' : ''} × {selectedBaseIds.size} base{selectedBaseIds.size !== 1 ? 's' : ''})
                     </>
                   )}
                 </Button>

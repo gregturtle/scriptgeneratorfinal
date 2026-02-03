@@ -21,6 +21,7 @@ Video Generation: Automatic video overlay using fluent-ffmpeg when background vi
 - **Components**: shadcn/ui built on Radix UI primitives
 - **Single-Page Interface**: Main entry point is a unified "Video Creator" interface with four tabs: Generate Iterations (variations of winning scripts), Generate New Scripts (original AI script generation), Process Existing Scripts (process scripts from Google Sheets), and Upload Creative to Meta (bulk upload videos from Google Drive to Meta Ad Account).
 - **Timestamped Organization**: Google Sheets tabs and Google Drive folders are timestamped for better tracking and batch management.
+- **Multi-Select Base Films**: Users can select multiple base films from Base_Database to create all script × base film combinations (e.g., 3 scripts × 5 base films = 15 video assets). Audio is generated once per script and reused across all base film combinations for efficiency.
 
 ### Technical Implementations
 - **Frontend**: Vite for fast development, TanStack Query for server state, Wouter for routing, React Hook Form with Zod for forms.

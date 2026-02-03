@@ -1711,6 +1711,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         voiceId, 
         language = 'en',
         baseVideo,
+        baseVideos = [], // Multiple base videos support
         backgroundVideos: selectedBackgroundVideos = [],
         backgroundVideosDrive = [],
         sendToSlack,
@@ -1724,52 +1725,57 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         return res.status(400).json({ error: 'Scripts array is required' });
       }
 
-      const backgroundCount = baseVideo?.fileLink ? 1 : (backgroundVideosDrive.length || selectedBackgroundVideos.length);
-      console.log(`Processing ${scripts.length} existing scripts into videos with ${backgroundCount} background video${backgroundCount === 1 ? '' : 's'}`);
+      // Use baseVideos array if provided, otherwise fall back to single baseVideo
+      const baseVideosList = baseVideos.length > 0 ? baseVideos : (baseVideo ? [baseVideo] : []);
+      const backgroundCount = baseVideosList.length || backgroundVideosDrive.length || selectedBackgroundVideos.length;
+      const totalCombinations = scripts.length * (baseVideosList.length || 1);
+      console.log(`Processing ${scripts.length} scripts × ${baseVideosList.length || 1} base film(s) = ${totalCombinations} video assets`);
 
-      // Write to Asset_Database and get auto-generated File_Names
+      // Write to Asset_Database for ALL script × base film combinations
       let assetEntries: Array<{ fileName: string; baseId: string; scriptId: string }> = [];
-      if (spreadsheetId && baseVideo?.baseId) {
+      if (spreadsheetId && baseVideosList.length > 0) {
         try {
-          const entries = scripts.map((script: any) => ({
-            baseId: baseVideo.baseId,
-            scriptId: script.scriptTitle, // scriptTitle contains the scriptId
-            subtitled: includeSubtitles
-          }));
+          // Create entries for all combinations: each script with each base film
+          const entries: Array<{ baseId: string; scriptId: string; subtitled: boolean }> = [];
+          for (const base of baseVideosList) {
+            for (const script of scripts) {
+              entries.push({
+                baseId: base.baseId,
+                scriptId: script.scriptTitle,
+                subtitled: includeSubtitles
+              });
+            }
+          }
           
           assetEntries = await googleSheetsService.writeAssetEntries(spreadsheetId, entries);
-          console.log(`Got ${assetEntries.length} File_Names from Asset_Database`);
+          console.log(`Got ${assetEntries.length} File_Names from Asset_Database for ${totalCombinations} combinations`);
         } catch (assetError) {
           console.error('Error writing to Asset_Database:', assetError);
           // Continue without Asset_Database if it fails
         }
       }
 
-      // Build a map of Asset_Database entries by scriptId for reliable matching
+      // Build a map of Asset_Database entries by scriptId+baseId for reliable matching
       const assetEntriesMap = new Map<string, { fileName: string; baseId: string; scriptId: string }>();
       for (const entry of assetEntries) {
-        assetEntriesMap.set(entry.scriptId, entry);
+        const key = `${entry.scriptId}_${entry.baseId}`;
+        assetEntriesMap.set(key, entry);
       }
 
       // Transform the scripts from Google Sheets format to the format expected by our services
-      const formattedScripts = scripts.map((script, index) => {
-        // Use File_Name from Asset_Database if available (matched by scriptId), otherwise generate one
-        const scriptId = script.scriptTitle; // scriptTitle contains the scriptId
-        const assetEntry = assetEntriesMap.get(scriptId);
-        const fileName = assetEntry?.fileName || generateScriptFileName(index, scriptId);
-        
+      const formattedScripts = scripts.map((script) => {
         return {
           title: script.scriptTitle,
-          content: script.content || script.nativeContent, // Use English content if available, otherwise native
+          content: script.content || script.nativeContent,
           nativeContent: script.nativeContent,
           language: script.recordingLanguage === 'English' ? 'en' : language,
           reasoning: script.reasoning,
           notableAdjustments: script.translationNotes,
-          fileName
+          scriptId: script.scriptTitle // Keep the scriptId for Asset_Database lookup
         };
       });
 
-      // Generate audio for the scripts (once per script)
+      // Generate audio for the scripts (once per script - audio is reused across base films)
       const voiceIdToUse = voiceId || 'huvDR9lwwSKC0zEjZUox'; // Default to Ella AI
       const scriptsWithAudio = await elevenLabsService.generateScriptVoiceovers(
         formattedScripts,
@@ -1778,126 +1784,169 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
 
       console.log(`Generated audio for ${scriptsWithAudio.length} scripts`);
 
-      // Generate videos for each script with each selected background video
+      // Generate videos for each script × base film combination
       let allScriptsWithVideos: any[] = [];
+      const baseFilmErrors: Array<{ baseId: string; error: string }> = [];
+      let successfulBases = 0;
       
-      // Build list of background video paths - download from Drive if needed
-      let videosToUse: string[] = [];
-      
-      if (baseVideo && baseVideo.fileLink) {
-        const fileId = googleDriveService.extractFileIdFromLink(baseVideo.fileLink);
-        const folderId = fileId ? null : googleDriveService.extractFolderIdFromLink(baseVideo.fileLink);
+      // Process each base video from baseVideosList
+      if (baseVideosList.length > 0) {
+        for (const baseVideoItem of baseVideosList) {
+          const fileId = googleDriveService.extractFileIdFromLink(baseVideoItem.fileLink);
+          const folderId = fileId ? null : googleDriveService.extractFolderIdFromLink(baseVideoItem.fileLink);
 
-        if (fileId) {
-          const fileInfo = await googleDriveService.getFileInfo(fileId);
-          if (!fileInfo || !fileInfo.name) {
-            return res.status(400).json({
-              error: 'Base film not found',
-              details: 'Could not find the selected Base_ID file in Google Drive. Please choose another Base_ID.'
-            });
-          }
+          let downloadedPath: string | null = null;
 
-          if (fileInfo.mimeType && !fileInfo.mimeType.startsWith('video/')) {
-            return res.status(400).json({
-              error: 'Invalid base film',
-              details: 'Selected Base_ID link does not point to a video file. Please choose another Base_ID.'
-            });
-          }
+          if (fileId) {
+            const fileInfo = await googleDriveService.getFileInfo(fileId);
+            if (!fileInfo || !fileInfo.name) {
+              console.error(`Base film not found: ${baseVideoItem.baseId}`);
+              baseFilmErrors.push({ baseId: baseVideoItem.baseId, error: 'File not found in Google Drive' });
+              continue;
+            }
 
-          console.log(`Downloading base film from Drive: ${fileInfo.name} (${fileId})`);
-          const downloadResult = await googleDriveService.downloadBaseFilmToTemp(fileId, fileInfo.name);
-          if (downloadResult.success && downloadResult.filePath) {
-            videosToUse.push(downloadResult.filePath);
+            if (fileInfo.mimeType && !fileInfo.mimeType.startsWith('video/')) {
+              console.error(`Invalid base film (not a video): ${baseVideoItem.baseId}`);
+              baseFilmErrors.push({ baseId: baseVideoItem.baseId, error: 'Link does not point to a video file' });
+              continue;
+            }
+
+            console.log(`Downloading base film: ${fileInfo.name} (${baseVideoItem.baseId})`);
+            const downloadResult = await googleDriveService.downloadBaseFilmToTemp(fileId, fileInfo.name);
+            if (downloadResult.success && downloadResult.filePath) {
+              downloadedPath = downloadResult.filePath;
+            } else {
+              console.error(`Failed to download base film ${baseVideoItem.baseId}:`, downloadResult.error);
+              baseFilmErrors.push({ baseId: baseVideoItem.baseId, error: downloadResult.error || 'Failed to download from Google Drive' });
+              continue;
+            }
+          } else if (folderId) {
+            const folderVideos = await googleDriveService.listBaseFilms(folderId);
+            if (folderVideos.length === 0) {
+              console.error(`No videos in folder for base film ${baseVideoItem.baseId}`);
+              baseFilmErrors.push({ baseId: baseVideoItem.baseId, error: 'Folder contains no video files' });
+              continue;
+            }
+            if (folderVideos.length > 1) {
+              console.error(`Multiple videos in folder for base film ${baseVideoItem.baseId}`);
+              baseFilmErrors.push({ baseId: baseVideoItem.baseId, error: `Folder contains ${folderVideos.length} videos, expected 1` });
+              continue;
+            }
+
+            const [video] = folderVideos;
+            console.log(`Downloading base film from folder: ${video.name} (${baseVideoItem.baseId})`);
+            const downloadResult = await googleDriveService.downloadBaseFilmToTemp(video.id, video.name);
+            if (downloadResult.success && downloadResult.filePath) {
+              downloadedPath = downloadResult.filePath;
+            } else {
+              console.error(`Failed to download base film ${baseVideoItem.baseId}:`, downloadResult.error);
+              baseFilmErrors.push({ baseId: baseVideoItem.baseId, error: downloadResult.error || 'Failed to download from Google Drive' });
+              continue;
+            }
           } else {
-            return res.status(400).json({
-              error: 'Failed to download base film',
-              details: downloadResult.error || 'Failed to download base film from Google Drive. Please choose another Base_ID.'
-            });
-          }
-        } else if (folderId) {
-          const folderVideos = await googleDriveService.listBaseFilms(folderId);
-          if (folderVideos.length === 0) {
-            return res.status(400).json({
-              error: 'No videos found',
-              details: 'Selected Base_ID points to a folder with no video files. Please choose another Base_ID.'
-            });
-          }
-          if (folderVideos.length > 1) {
-            return res.status(400).json({
-              error: 'Multiple videos found',
-              details: `Selected Base_ID folder contains ${folderVideos.length} videos. Please provide a direct file link or ensure the folder has a single video.`
-            });
+            console.error(`Invalid base film link for ${baseVideoItem.baseId}`);
+            baseFilmErrors.push({ baseId: baseVideoItem.baseId, error: 'Invalid Google Drive link format' });
+            continue;
           }
 
-          const [video] = folderVideos;
-          console.log(`Downloading base film from folder: ${video.name} (${video.id})`);
-          const downloadResult = await googleDriveService.downloadBaseFilmToTemp(video.id, video.name);
-          if (downloadResult.success && downloadResult.filePath) {
-            videosToUse.push(downloadResult.filePath);
-          } else {
-            return res.status(400).json({
-              error: 'Failed to download base film',
-              details: downloadResult.error || 'Failed to download base film from Google Drive. Please choose another Base_ID.'
-            });
+          if (downloadedPath) {
+            try {
+              // Create scripts with filenames from Asset_Database using composite key (scriptId + baseId)
+              const scriptsForThisBase = scriptsWithAudio.map((script, idx) => {
+                const scriptId = formattedScripts[idx].scriptId;
+                const compositeKey = `${scriptId}_${baseVideoItem.baseId}`;
+                const assetEntry = assetEntriesMap.get(compositeKey);
+                const fileName = assetEntry?.fileName || generateScriptFileName(idx, `${scriptId}_${baseVideoItem.baseId}`);
+                
+                return {
+                  ...script,
+                  fileName
+                };
+              });
+              
+              const scriptsWithVideos = await videoService.createVideosForScripts(
+                scriptsForThisBase,
+                downloadedPath,
+                includeSubtitles,
+                baseVideoItem.baseTitle
+              );
+              
+              // Add the base video info to each result
+              const scriptsWithBaseInfo = scriptsWithVideos.map(s => ({
+                ...s,
+                backgroundVideoName: path.basename(downloadedPath!),
+                baseId: baseVideoItem.baseId,
+                baseTitle: baseVideoItem.baseTitle
+              }));
+              
+              allScriptsWithVideos.push(...scriptsWithBaseInfo);
+              successfulBases++;
+              console.log(`Created ${scriptsWithVideos.filter(s => s.videoUrl).length} videos with base: ${baseVideoItem.baseId}`);
+            } catch (videoError: any) {
+              console.error(`Video creation failed for ${baseVideoItem.baseId}:`, videoError);
+              baseFilmErrors.push({ baseId: baseVideoItem.baseId, error: videoError?.message || 'Video creation failed' });
+            }
           }
-        } else {
+        }
+        
+        // If all base films failed, return an error
+        if (successfulBases === 0 && baseVideosList.length > 0) {
           return res.status(400).json({
-            error: 'Invalid base film link',
-            details: 'Selected Base_ID has an invalid Google Drive link. Please choose another Base_ID.'
+            error: 'All base films failed',
+            details: 'Could not process any of the selected base films.',
+            baseFilmErrors
           });
         }
       } else if (backgroundVideosDrive && backgroundVideosDrive.length > 0) {
-        // Download each base film from Google Drive
+        // Legacy: Download each base film from Google Drive
         for (const driveVideo of backgroundVideosDrive) {
           if (driveVideo.driveId && driveVideo.name) {
             console.log(`Downloading base film from Drive: ${driveVideo.name} (${driveVideo.driveId})`);
             const downloadResult = await googleDriveService.downloadBaseFilmToTemp(driveVideo.driveId, driveVideo.name);
             if (downloadResult.success && downloadResult.filePath) {
-              videosToUse.push(downloadResult.filePath);
-              console.log(`Base film downloaded to: ${downloadResult.filePath}`);
-            } else {
-              console.error(`Failed to download base film ${driveVideo.name}:`, downloadResult.error);
+              const scriptsForThisVideo = scriptsWithAudio.map((script, idx) => ({
+                ...script,
+                fileName: generateScriptFileName(idx, formattedScripts[idx].scriptId)
+              }));
+              
+              const scriptsWithVideos = await videoService.createVideosForScripts(
+                scriptsForThisVideo,
+                downloadResult.filePath,
+                includeSubtitles,
+                undefined
+              );
+              
+              const scriptsWithBgInfo = scriptsWithVideos.map(s => ({
+                ...s,
+                backgroundVideoName: driveVideo.name
+              }));
+              
+              allScriptsWithVideos.push(...scriptsWithBgInfo);
             }
           }
         }
       } else if (selectedBackgroundVideos && selectedBackgroundVideos.length > 0) {
-        // Use local paths (legacy support)
-        videosToUse = selectedBackgroundVideos;
-      }
-      
-      if (videosToUse.length > 0) {
-        for (const bgVideo of videosToUse) {
-          try {
-            // Get just the filename for the video suffix
-            const bgVideoName = path.basename(bgVideo, path.extname(bgVideo)).replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20);
-            
-            // Create scripts with filenames from Asset_Database (exact match required)
-            const scriptsForThisVideo = scriptsWithAudio.map((script, idx) => ({
-              ...script,
-              fileName: formattedScripts[idx].fileName
-            }));
-            
-            const scriptsWithVideos = await videoService.createVideosForScripts(
-              scriptsForThisVideo,
-              bgVideo,
-              includeSubtitles,
-              baseVideo?.baseTitle
-            );
-            
-            // Add the background video name to each result for reference
-            const scriptsWithBgInfo = scriptsWithVideos.map(s => ({
-              ...s,
-              backgroundVideoName: path.basename(bgVideo)
-            }));
-            
-            allScriptsWithVideos.push(...scriptsWithBgInfo);
-            console.log(`Created ${scriptsWithVideos.filter(s => s.videoUrl).length} videos with background: ${path.basename(bgVideo)}`);
-          } catch (videoError) {
-            console.error(`Video creation failed for ${bgVideo}:`, videoError);
-          }
+        // Legacy: Use local paths
+        for (const bgVideo of selectedBackgroundVideos) {
+          const scriptsForThisVideo = scriptsWithAudio.map((script, idx) => ({
+            ...script,
+            fileName: generateScriptFileName(idx, formattedScripts[idx].scriptId)
+          }));
+          
+          const scriptsWithVideos = await videoService.createVideosForScripts(
+            scriptsForThisVideo,
+            bgVideo,
+            includeSubtitles,
+            undefined
+          );
+          
+          allScriptsWithVideos.push(...scriptsWithVideos.map(s => ({
+            ...s,
+            backgroundVideoName: path.basename(bgVideo)
+          })));
         }
       } else {
-        // No videos to use, just keep the audio scripts
+        // No base videos, just keep the audio scripts
         allScriptsWithVideos = scriptsWithAudio;
       }
       
@@ -1995,7 +2044,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           driveFolder: driveFolder.webViewLink,
           assetsForMetaUpload: assetsWithDriveIds,
           metaMarket: normalizeMetaMarket(metaMarket) || 'UK',
-          message: `Processed ${scriptsWithVideos.length} scripts successfully`
+          baseFilmErrors: baseFilmErrors.length > 0 ? baseFilmErrors : undefined,
+          message: `Processed ${scriptsWithVideos.length} scripts successfully${baseFilmErrors.length > 0 ? ` (${baseFilmErrors.length} base film(s) failed)` : ''}`
         });
       } else {
         res.json({
@@ -2005,7 +2055,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           scripts: scriptsWithVideos,
           assetsForMetaUpload,
           metaMarket: normalizeMetaMarket(metaMarket) || 'UK',
-          message: `Processed ${scriptsWithVideos.length} scripts successfully`
+          baseFilmErrors: baseFilmErrors.length > 0 ? baseFilmErrors : undefined,
+          message: `Processed ${scriptsWithVideos.length} scripts successfully${baseFilmErrors.length > 0 ? ` (${baseFilmErrors.length} base film(s) failed)` : ''}`
         });
       }
     } catch (error: any) {
