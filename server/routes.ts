@@ -1789,6 +1789,26 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       const baseFilmErrors: Array<{ baseId: string; error: string }> = [];
       let successfulBases = 0;
       
+      // Create ONE batch folder for ALL videos before processing base films
+      let sharedBatchFolderId: string | null = null;
+      let sharedBatchFolderLink: string | null = null;
+      
+      if (baseVideosList.length > 0) {
+        try {
+          console.log(`Creating shared batch folder for ${totalCombinations} videos across ${baseVideosList.length} base films`);
+          if (googleDriveService.isConfigured()) {
+            sharedBatchFolderId = await googleDriveService.createTimestampedSubfolder(
+              '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh',
+              undefined // No base title - this folder contains all base films
+            );
+            sharedBatchFolderLink = `https://drive.google.com/drive/folders/${sharedBatchFolderId}`;
+            console.log(`Created shared batch folder: ${sharedBatchFolderLink}`);
+          }
+        } catch (error) {
+          console.error('Failed to create shared batch folder:', error);
+        }
+      }
+      
       // Process each base video from baseVideosList
       if (baseVideosList.length > 0) {
         for (const baseVideoItem of baseVideosList) {
@@ -1868,7 +1888,9 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
                 scriptsForThisBase,
                 downloadedPath,
                 includeSubtitles,
-                baseVideoItem.baseTitle
+                baseVideoItem.baseTitle,
+                sharedBatchFolderId,
+                sharedBatchFolderLink
               );
               
               // Add the base video info to each result
