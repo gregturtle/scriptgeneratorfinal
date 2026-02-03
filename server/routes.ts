@@ -3128,7 +3128,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           
           // Create ad
           const adId = await metaApiService.createAdFromCreative(accessToken, {
-            name: `Ad - ${fileName}`,
+            name: fileName,
             adSetId,
             creativeId,
             status: "PAUSED",
