@@ -1062,6 +1062,72 @@ class GoogleSheetsService {
       throw error;
     }
   }
+
+  /**
+   * Update Asset_Database column M (GDrive_Link) with video links after videos are uploaded
+   * Finds rows by matching fileName in column A
+   */
+  async updateAssetVideoLinks(
+    spreadsheetId: string,
+    updates: Array<{
+      fileName: string;
+      videoLink: string;
+    }>
+  ): Promise<void> {
+    try {
+      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
+      
+      console.log(`Updating ${updates.length} video links in Asset_Database column M`);
+
+      // Read column A to find rows by fileName
+      const fileNamesResponse = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: cleanSpreadsheetId,
+        range: `${this.ASSET_DATABASE_TAB_NAME}!A:A`,
+      });
+      
+      const fileNames = fileNamesResponse.data.values || [];
+      
+      // Build batch update data
+      const batchData: Array<{range: string; values: any[][]}> = [];
+      
+      for (const update of updates) {
+        // Find the row with this fileName (skip header row 0)
+        let rowNum = -1;
+        for (let i = 1; i < fileNames.length; i++) {
+          const cellValue = fileNames[i]?.[0]?.toString().trim() || '';
+          if (cellValue === update.fileName) {
+            rowNum = i + 1; // Convert to 1-indexed row number
+            break;
+          }
+        }
+        
+        if (rowNum > 0) {
+          batchData.push({
+            range: `${this.ASSET_DATABASE_TAB_NAME}!M${rowNum}`,
+            values: [[update.videoLink]]
+          });
+          console.log(`Will update row ${rowNum} (${update.fileName}) with link: ${update.videoLink}`);
+        } else {
+          console.warn(`Could not find row for fileName: ${update.fileName}`);
+        }
+      }
+      
+      if (batchData.length > 0) {
+        await this.sheets.spreadsheets.values.batchUpdate({
+          spreadsheetId: cleanSpreadsheetId,
+          requestBody: {
+            valueInputOption: 'RAW',
+            data: batchData
+          }
+        });
+        
+        console.log(`Updated ${batchData.length} video links in Asset_Database column M`);
+      }
+    } catch (error) {
+      console.error('Error updating video links in Asset_Database:', error);
+      throw error;
+    }
+  }
 }
 
 export const googleSheetsService = new GoogleSheetsService();

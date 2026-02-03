@@ -1985,6 +1985,23 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       
       console.log(`[Video Creation] Created ${assetsForMetaUpload.length} video assets ready for Meta upload`);
 
+      // Update Asset_Database column M with video links
+      if (assetsForMetaUpload.length > 0 && spreadsheetId) {
+        try {
+          const videoLinkUpdates = assetsForMetaUpload.map((asset: any) => ({
+            fileName: asset.fileName,
+            videoLink: asset.driveLink
+          })).filter((update: any) => update.fileName && update.videoLink);
+          
+          if (videoLinkUpdates.length > 0) {
+            await googleSheetsService.updateAssetVideoLinks(spreadsheetId, videoLinkUpdates);
+            console.log(`Updated ${videoLinkUpdates.length} video links in Asset_Database column M`);
+          }
+        } catch (linkUpdateError) {
+          console.error('Error updating video links in Asset_Database:', linkUpdateError);
+        }
+      }
+
       // Send to Slack if requested
       if (sendToSlack) {
         const timestamp = new Date().toISOString();
