@@ -1138,7 +1138,25 @@ class GoogleSheetsService {
       const tabName = 'Campaign_Pausing_Report';
       
       console.log(`[Campaign_Pausing_Report] Spreadsheet ID: ${cleanSpreadsheetId}`);
-      console.log(`[Campaign_Pausing_Report] Appending ${adEntries.length} entries to tab: ${tabName}`);
+      console.log(`[Campaign_Pausing_Report] Writing ${adEntries.length} entries to tab: ${tabName}`);
+
+      // Find the last row with actual data in column D (Campaign_Name)
+      const existingData = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: cleanSpreadsheetId,
+        range: `${tabName}!D:D`,
+      });
+      
+      const values = existingData.data.values || [];
+      // Find the last row that has actual content (not empty string)
+      let lastRowWithData = 0;
+      for (let i = 0; i < values.length; i++) {
+        if (values[i] && values[i][0] && values[i][0].toString().trim() !== '') {
+          lastRowWithData = i + 1; // 1-indexed
+        }
+      }
+      
+      const startRow = lastRowWithData + 1;
+      console.log(`[Campaign_Pausing_Report] Last row with data: ${lastRowWithData}, writing to row: ${startRow}`);
 
       // Build rows with empty columns A, B, C and data in D, E, F
       const rows = adEntries.map(entry => [
@@ -1150,19 +1168,18 @@ class GoogleSheetsService {
         entry.adName // Column F - Ad_Name
       ]);
 
-      const response = await this.sheets.spreadsheets.values.append({
+      // Write directly to the calculated row
+      const response = await this.sheets.spreadsheets.values.update({
         spreadsheetId: cleanSpreadsheetId,
-        range: `${tabName}!A:F`,
+        range: `${tabName}!A${startRow}:F${startRow + rows.length - 1}`,
         valueInputOption: 'RAW',
-        insertDataOption: 'INSERT_ROWS',
         requestBody: {
           values: rows
         }
       });
 
-      console.log(`[Campaign_Pausing_Report] API Response:`, JSON.stringify(response.data, null, 2));
-      console.log(`[Campaign_Pausing_Report] Updated range: ${response.data?.updates?.updatedRange}`);
-      console.log(`[Campaign_Pausing_Report] Rows updated: ${response.data?.updates?.updatedRows}`);
+      console.log(`[Campaign_Pausing_Report] Updated range: ${response.data?.updatedRange}`);
+      console.log(`[Campaign_Pausing_Report] Rows updated: ${response.data?.updatedRows}`);
       console.log(`[Campaign_Pausing_Report] First entry: Campaign=${adEntries[0]?.campaignName}, AdId=${adEntries[0]?.adId}, AdName=${adEntries[0]?.adName}`);
     } catch (error: any) {
       console.error('[Campaign_Pausing_Report] Error:', error?.message || error);
