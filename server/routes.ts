@@ -3052,7 +3052,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
   app.post('/api/meta/create-campaign', async (req, res) => {
     try {
       const accessToken = await getAccessToken();
-      const { uploadedAssets, metaMarket } = req.body;
+      const { uploadedAssets, metaMarket, spreadsheetId } = req.body;
       
       if (!uploadedAssets || !Array.isArray(uploadedAssets) || uploadedAssets.length === 0) {
         return res.status(400).json({ error: 'uploadedAssets array is required' });
@@ -3157,6 +3157,22 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       
       const successCount = adResults.filter(r => r.success).length;
       console.log(`[Meta Campaign] Completed: ${successCount}/${uploadedAssets.length} ads created`);
+      
+      // Write successful ads to Campaign_Pausing_Report in Google Sheets
+      const successfulAds = adResults.filter(r => r.success);
+      if (successfulAds.length > 0 && spreadsheetId) {
+        try {
+          const adEntries = successfulAds.map(ad => ({
+            campaignName: campaignName,
+            adId: ad.adId,
+            adName: ad.fileName
+          }));
+          await googleSheetsService.appendToCampaignPausingReport(spreadsheetId, adEntries);
+          console.log(`[Meta Campaign] Wrote ${adEntries.length} entries to Campaign_Pausing_Report`);
+        } catch (sheetError) {
+          console.error('[Meta Campaign] Error writing to Campaign_Pausing_Report:', sheetError);
+        }
+      }
       
       res.json({
         success: successCount > 0,

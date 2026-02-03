@@ -486,7 +486,8 @@ export default function Unified() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           uploadedAssets, 
-          metaMarket: batchMetaMarket || metaMarket 
+          metaMarket: batchMetaMarket || metaMarket,
+          spreadsheetId: spreadsheetId.trim()
         })
       });
 

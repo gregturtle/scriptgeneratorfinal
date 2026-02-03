@@ -1128,6 +1128,43 @@ class GoogleSheetsService {
       throw error;
     }
   }
+
+  async appendToCampaignPausingReport(
+    spreadsheetId: string,
+    adEntries: Array<{ campaignName: string; adId: string; adName: string }>
+  ): Promise<void> {
+    try {
+      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
+      const tabName = 'Campaign_Pausing_Report';
+      
+      console.log(`Appending ${adEntries.length} entries to ${tabName}`);
+
+      // Build rows with empty columns A, B, C and data in D, E, F
+      const rows = adEntries.map(entry => [
+        '', // Column A
+        '', // Column B
+        '', // Column C
+        entry.campaignName, // Column D - Campaign_Name
+        entry.adId, // Column E - Ad_Id
+        entry.adName // Column F - Ad_Name
+      ]);
+
+      await this.sheets.spreadsheets.values.append({
+        spreadsheetId: cleanSpreadsheetId,
+        range: `${tabName}!A:F`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: {
+          values: rows
+        }
+      });
+
+      console.log(`Successfully appended ${adEntries.length} entries to ${tabName}`);
+    } catch (error) {
+      console.error('Error appending to Campaign_Pausing_Report:', error);
+      throw error;
+    }
+  }
 }
 
 export const googleSheetsService = new GoogleSheetsService();
