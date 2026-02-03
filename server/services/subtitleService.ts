@@ -33,55 +33,78 @@ export class SubtitleService {
   }
 
   /**
-   * Split text into sentences
+   * Split text into word chunks of specified size (5-6 words per chunk)
+   * Tries to break at natural pause points when possible
    */
-  private splitIntoSentences(text: string): string[] {
-    // Split on sentence boundaries (., !, ?) followed by space or end of string
-    const sentences = text
-      .split(/([.!?]+\s+|[.!?]+$)/)
-      .filter(s => s.trim().length > 0)
-      .reduce((acc: string[], curr, i, arr) => {
-        // Combine sentence with its punctuation
-        if (i % 2 === 0 && arr[i + 1]) {
-          acc.push((curr + arr[i + 1]).trim());
-        } else if (i % 2 === 0) {
-          acc.push(curr.trim());
-        }
-        return acc;
-      }, []);
-
-    // If no sentences were found (no punctuation), treat the whole text as one sentence
-    if (sentences.length === 0) {
-      return [text.trim()];
+  private splitIntoWordChunks(text: string, wordsPerChunk: number = 5): string[] {
+    const words = text.split(/\s+/).filter(w => w.length > 0);
+    
+    if (words.length === 0) {
+      return [];
     }
-
-    return sentences;
+    
+    const chunks: string[] = [];
+    let currentChunk: string[] = [];
+    
+    for (let i = 0; i < words.length; i++) {
+      currentChunk.push(words[i]);
+      
+      // Check if we should end this chunk
+      const atChunkLimit = currentChunk.length >= wordsPerChunk;
+      const atMaxLimit = currentChunk.length >= wordsPerChunk + 1; // Allow 1 extra word for natural breaks
+      const currentWord = words[i];
+      const isNaturalBreak = /[,;:\-\u2014]$/.test(currentWord) || /[.!?]$/.test(currentWord);
+      const isLastWord = i === words.length - 1;
+      
+      // End chunk if: at max limit, or at chunk limit with natural break, or last word
+      if (atMaxLimit || (atChunkLimit && isNaturalBreak) || isLastWord) {
+        chunks.push(currentChunk.join(' '));
+        currentChunk = [];
+      } else if (atChunkLimit) {
+        // Look ahead - if next word ends with punctuation, include it
+        const nextWord = words[i + 1];
+        if (nextWord && /[,;:\-\u2014.!?]$/.test(nextWord)) {
+          // Include next word to keep punctuation with its word
+          continue;
+        }
+        chunks.push(currentChunk.join(' '));
+        currentChunk = [];
+      }
+    }
+    
+    // Add any remaining words
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk.join(' '));
+    }
+    
+    return chunks;
   }
 
   /**
    * Generate subtitle segments with timing based on audio duration
+   * Uses word-based chunking (5-6 words per segment) for better readability
    */
   private generateSegments(text: string, durationMs: number): SubtitleSegment[] {
-    const sentences = this.splitIntoSentences(text);
+    const chunks = this.splitIntoWordChunks(text, 5); // 5-6 words per chunk
     
-    if (sentences.length === 0) {
+    if (chunks.length === 0) {
       return [];
     }
 
-    // Calculate total character count for proportional timing
-    const totalChars = sentences.reduce((sum, s) => sum + s.length, 0);
+    // Calculate total word count for proportional timing
+    const totalWords = chunks.reduce((sum, chunk) => sum + chunk.split(/\s+/).length, 0);
     
     const segments: SubtitleSegment[] = [];
     let currentTime = 0;
 
-    sentences.forEach((sentence, index) => {
-      // Allocate time proportional to sentence length
-      const sentenceChars = sentence.length;
-      const proportion = sentenceChars / totalChars;
+    chunks.forEach((chunk) => {
+      // Allocate time proportional to word count in chunk
+      const chunkWords = chunk.split(/\s+/).length;
+      const proportion = chunkWords / totalWords;
       const segmentDuration = durationMs * proportion;
 
-      // Ensure minimum duration of 1 second per subtitle
-      const minDuration = 1000;
+      // Ensure minimum duration of 0.8 seconds per subtitle (faster pace for short chunks)
+      const minDuration = 800;
       const adjustedDuration = Math.max(segmentDuration, minDuration);
 
       const start = Math.round(currentTime);
@@ -90,7 +113,7 @@ export class SubtitleService {
       segments.push({
         start,
         end,
-        text: sentence
+        text: chunk
       });
 
       currentTime = end;
