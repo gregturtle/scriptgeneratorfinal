@@ -1150,7 +1150,7 @@ class GoogleSheetsService {
         entry.adName // Column F - Ad_Name
       ]);
 
-      await this.sheets.spreadsheets.values.append({
+      const response = await this.sheets.spreadsheets.values.append({
         spreadsheetId: cleanSpreadsheetId,
         range: `${tabName}!A:F`,
         valueInputOption: 'RAW',
@@ -1160,7 +1160,9 @@ class GoogleSheetsService {
         }
       });
 
-      console.log(`[Campaign_Pausing_Report] Successfully appended ${adEntries.length} entries`);
+      console.log(`[Campaign_Pausing_Report] API Response:`, JSON.stringify(response.data, null, 2));
+      console.log(`[Campaign_Pausing_Report] Updated range: ${response.data?.updates?.updatedRange}`);
+      console.log(`[Campaign_Pausing_Report] Rows updated: ${response.data?.updates?.updatedRows}`);
       console.log(`[Campaign_Pausing_Report] First entry: Campaign=${adEntries[0]?.campaignName}, AdId=${adEntries[0]?.adId}, AdName=${adEntries[0]?.adName}`);
     } catch (error: any) {
       console.error('[Campaign_Pausing_Report] Error:', error?.message || error);
