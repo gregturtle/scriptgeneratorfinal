@@ -1844,7 +1844,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
             let uploadedFileLink = null;
             
             if (batchFolderId) {
-              const uploadResult = await googleDriveService.uploadFile(baseFilePath, batchFolderId, fileName);
+              const uploadResult = await googleDriveService.uploadVideoToSpecificFolder(baseFilePath, fileName, batchFolderId);
               uploadedFileLink = uploadResult.webViewLink;
               console.log(`Uploaded ${fileName} to Drive: ${uploadedFileLink}`);
               
