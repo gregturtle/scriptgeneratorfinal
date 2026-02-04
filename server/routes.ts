@@ -1843,10 +1843,12 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
             const fileName = assetFileName ? `${assetFileName}.mp4` : `${base.baseId}_${base.baseTitle || 'video'}.mp4`;
             let uploadedFileLink = null;
             
+            let uploadedFileId = null;
             if (batchFolderId) {
               const uploadResult = await googleDriveService.uploadVideoToSpecificFolder(baseFilePath, fileName, batchFolderId);
               uploadedFileLink = uploadResult.webViewLink;
-              console.log(`Uploaded ${fileName} to Drive: ${uploadedFileLink}`);
+              uploadedFileId = uploadResult.id;
+              console.log(`Uploaded ${fileName} to Drive: ${uploadedFileLink} (ID: ${uploadedFileId})`);
               
               // Track for Asset_Database update
               if (assetFileName && uploadedFileLink) {
@@ -1857,10 +1859,11 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
             uploadedVideos.push({
               baseId: base.baseId,
               baseTitle: base.baseTitle,
-              fileName: fileName,
+              fileName: fileName.replace('.mp4', ''),
               localPath: baseFilePath,
               driveLink: uploadedFileLink,
-              folderLink: batchFolderLink
+              folderLink: batchFolderLink,
+              videoFileId: uploadedFileId
             });
             
             // Clean up downloaded file
@@ -1907,13 +1910,26 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           }
         }
         
+        // Build assetsForMetaUpload for the "Upload to Meta" button
+        const assetsForMetaUpload = uploadedVideos
+          .filter((v: any) => v.videoFileId)
+          .map((v: any) => ({
+            fileName: v.fileName,
+            videoFileId: v.videoFileId,
+            driveLink: v.driveLink
+          }));
+        
+        console.log(`[No-Script Mode] Created ${assetsForMetaUpload.length} assets ready for Meta upload`);
+        
         return res.json({
           success: true,
           noScriptMode: true,
           message: `Uploaded ${uploadedVideos.length} base film(s) to Google Drive`,
           videos: uploadedVideos,
           batchFolderLink: batchFolderLink,
-          totalVideos: uploadedVideos.length
+          totalVideos: uploadedVideos.length,
+          assetsForMetaUpload: assetsForMetaUpload,
+          metaMarket: metaMarket || 'UK'
         });
       }
 
