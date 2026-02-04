@@ -1719,27 +1719,32 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         slackNotificationDelay = 0,
         includeSubtitles = false,
         spreadsheetId,
-        metaMarket
+        metaMarket,
+        noScriptMode = false // Skip audio - just use base films directly
       } = req.body;
       
-      if (!scripts || !Array.isArray(scripts)) {
+      // In no-script mode, scripts can be empty
+      if (!noScriptMode && (!scripts || !Array.isArray(scripts) || scripts.length === 0)) {
         return res.status(400).json({ error: 'Scripts array is required' });
       }
 
       // Use baseVideos array if provided, otherwise fall back to single baseVideo
       const baseVideosList = baseVideos.length > 0 ? baseVideos : (baseVideo ? [baseVideo] : []);
       const backgroundCount = baseVideosList.length || backgroundVideosDrive.length || selectedBackgroundVideos.length;
-      const totalCombinations = scripts.length * (baseVideosList.length || 1);
-      console.log(`Processing ${scripts.length} scripts × ${baseVideosList.length || 1} base film(s) = ${totalCombinations} video assets`);
+      const scriptsArray = scripts || [];
+      const totalCombinations = noScriptMode ? baseVideosList.length : scriptsArray.length * (baseVideosList.length || 1);
+      console.log(noScriptMode 
+        ? `No-script mode: Processing ${baseVideosList.length} base film(s) directly`
+        : `Processing ${scriptsArray.length} scripts × ${baseVideosList.length || 1} base film(s) = ${totalCombinations} video assets`);
 
-      // Write to Asset_Database for ALL script × base film combinations
+      // Write to Asset_Database for ALL script × base film combinations (skip in no-script mode)
       let assetEntries: Array<{ fileName: string; baseId: string; scriptId: string }> = [];
-      if (spreadsheetId && baseVideosList.length > 0) {
+      if (!noScriptMode && spreadsheetId && baseVideosList.length > 0) {
         try {
           // Create entries for all combinations: each script with each base film
           const entries: Array<{ baseId: string; scriptId: string; subtitled: boolean; voiceName?: string }> = [];
           for (const base of baseVideosList) {
-            for (const script of scripts) {
+            for (const script of scriptsArray) {
               entries.push({
                 baseId: base.baseId,
                 scriptId: script.scriptTitle,
@@ -1764,8 +1769,99 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         assetEntriesMap.set(key, entry);
       }
 
+      // === NO-SCRIPT MODE: Upload base films directly without audio ===
+      if (noScriptMode) {
+        console.log(`No-script mode: Uploading ${baseVideosList.length} base films directly to Google Drive`);
+        
+        // Create batch folder
+        let batchFolderId: string | null = null;
+        let batchFolderLink: string | null = null;
+        
+        if (googleDriveService.isConfigured()) {
+          batchFolderId = await googleDriveService.createTimestampedSubfolder(
+            '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh',
+            'NoScript'
+          );
+          batchFolderLink = `https://drive.google.com/drive/folders/${batchFolderId}`;
+          console.log(`Created batch folder for no-script mode: ${batchFolderLink}`);
+        }
+        
+        // Download each base film from Drive and re-upload to batch folder
+        const uploadedVideos: any[] = [];
+        
+        for (const base of baseVideosList) {
+          try {
+            console.log(`Processing base film: ${base.baseId} - ${base.baseTitle}`);
+            
+            // Download the base film
+            const baseFilePath = await googleDriveService.downloadFile(base.fileLink);
+            
+            // Upload to batch folder with base ID as filename
+            const fileName = `${base.baseId}_${base.baseTitle || 'video'}.mp4`;
+            let uploadedFileLink = null;
+            
+            if (batchFolderId) {
+              const uploadResult = await googleDriveService.uploadFile(baseFilePath, batchFolderId, fileName);
+              uploadedFileLink = uploadResult.webViewLink;
+              console.log(`Uploaded ${fileName} to Drive: ${uploadedFileLink}`);
+            }
+            
+            uploadedVideos.push({
+              baseId: base.baseId,
+              baseTitle: base.baseTitle,
+              fileName: fileName,
+              localPath: baseFilePath,
+              driveLink: uploadedFileLink,
+              folderLink: batchFolderLink
+            });
+            
+            // Clean up downloaded file
+            await fileService.cleanupFile(baseFilePath);
+          } catch (baseError: any) {
+            console.error(`Error processing base film ${base.baseId}:`, baseError.message);
+          }
+        }
+        
+        // Handle Slack notification if enabled
+        if (sendToSlack && uploadedVideos.length > 0) {
+          const slackService = new (await import('./services/slackService')).SlackService();
+          if (slackService.isConfigured()) {
+            const delayMinutes = slackNotificationDelay || 0;
+            console.log(`Scheduling Slack notification in ${delayMinutes} minutes for ${uploadedVideos.length} base films`);
+            
+            const slackScripts = uploadedVideos.map(v => ({
+              title: v.baseTitle || v.baseId,
+              content: `Base film: ${v.baseId}`,
+              driveLink: v.driveLink
+            }));
+            
+            setTimeout(async () => {
+              try {
+                await slackService.sendVideoBatchForApproval(
+                  slackScripts,
+                  batchFolderLink || '',
+                  metaMarket || 'UK'
+                );
+              } catch (slackError) {
+                console.error('Error sending to Slack:', slackError);
+              }
+            }, delayMinutes * 60 * 1000);
+          }
+        }
+        
+        return res.json({
+          success: true,
+          noScriptMode: true,
+          message: `Uploaded ${uploadedVideos.length} base film(s) to Google Drive`,
+          videos: uploadedVideos,
+          batchFolderLink: batchFolderLink,
+          totalVideos: uploadedVideos.length
+        });
+      }
+
+      // === NORMAL MODE: Generate audio and combine with base films ===
       // Transform the scripts from Google Sheets format to the format expected by our services
-      const formattedScripts = scripts.map((script) => {
+      const formattedScripts = scriptsArray.map((script) => {
         return {
           title: script.scriptTitle,
           content: script.content || script.nativeContent,

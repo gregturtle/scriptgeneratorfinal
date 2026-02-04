@@ -53,6 +53,7 @@ const createBlankRows = (): BaseAssetRow[] =>
 export default function Unified() {
   const [spreadsheetId, setSpreadsheetId] = useState('https://docs.google.com/spreadsheets/d/1TLgiPAJVgE9dZgjmv4bn5eN8zKX3VamTzhVgJ2GLKHQ/edit?gid=207339213#gid=207339213');
   const [includeSubtitles, setIncludeSubtitles] = useState(false);
+  const [noScriptMode, setNoScriptMode] = useState(false); // Skip audio/script, use base film only
   const [scriptCount, setScriptCount] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<ScriptResult | null>(null);
@@ -286,9 +287,10 @@ export default function Unified() {
     }
   };
 
-  // Process selected existing scripts into videos
+  // Process selected existing scripts into videos (or base films only in no-script mode)
   const handleProcessExistingScripts = async () => {
-    if (selectedScriptIds.size === 0) {
+    // In no-script mode, only require base films
+    if (!noScriptMode && selectedScriptIds.size === 0) {
       toast({
         title: "No scripts selected",
         description: "Please select at least one script to process",
@@ -322,17 +324,6 @@ export default function Unified() {
     setUploadedAssets([]);
     setCampaignResult(null);
     try {
-      // Get selected scripts from Script_Database
-      const scriptsToProcess = scriptDatabaseEntries
-        .filter(script => selectedScriptIds.has(script.scriptId))
-        .map(script => ({
-          scriptTitle: script.scriptId,
-          nativeContent: script.scriptCopy,
-          content: script.scriptCopy,
-          recordingLanguage: script.languageId || 'en',
-          sourceTab: 'Script_Database'
-        }));
-      
       // Map selected base films for backend
       const baseVideos = selectedBases.map(base => ({
         baseId: base.baseId,
@@ -340,25 +331,43 @@ export default function Unified() {
         fileLink: base.fileLink
       }));
       
-      // Find the voice name for the selected voice
-      const selectedVoiceData = availableVoices.find(v => v.voice_id === selectedVoice);
-      const voiceNameForAsset = selectedVoiceData?.name || '';
+      // In no-script mode, skip scripts entirely
+      let scriptsToProcess: any[] = [];
+      let voiceNameForAsset = '';
+      
+      if (!noScriptMode) {
+        // Get selected scripts from Script_Database
+        scriptsToProcess = scriptDatabaseEntries
+          .filter(script => selectedScriptIds.has(script.scriptId))
+          .map(script => ({
+            scriptTitle: script.scriptId,
+            nativeContent: script.scriptCopy,
+            content: script.scriptCopy,
+            recordingLanguage: script.languageId || 'en',
+            sourceTab: 'Script_Database'
+          }));
+        
+        // Find the voice name for the selected voice
+        const selectedVoiceData = availableVoices.find(v => v.voice_id === selectedVoice);
+        voiceNameForAsset = selectedVoiceData?.name || '';
+      }
       
       const response = await fetch('/api/scripts/process-to-videos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           scripts: scriptsToProcess,
-          voiceId: selectedVoice,
+          voiceId: noScriptMode ? null : selectedVoice,
           voiceName: voiceNameForAsset,
           language: selectedLanguage,
           baseVideos: baseVideos, // Multiple base videos
           baseVideo: baseVideos[0], // Keep for backwards compatibility
           sendToSlack: slackEnabled,
           slackNotificationDelay: slackEnabled ? 15 : 0, // 15 minute delay if Slack is enabled
-          includeSubtitles: includeSubtitles,
+          includeSubtitles: noScriptMode ? false : includeSubtitles,
           spreadsheetId: spreadsheetId,
-          metaMarket: metaMarket
+          metaMarket: metaMarket,
+          noScriptMode: noScriptMode // Flag for backend to skip audio generation
         })
       });
 
@@ -2023,8 +2032,23 @@ export default function Unified() {
               </div>
             )}
 
-            {/* Voice Selection */}
-            {availableVoices.length > 0 && (
+            {/* No Script Mode Toggle */}
+            <div className="flex items-center justify-between border rounded-lg p-4 bg-gray-50">
+              <div className="space-y-1">
+                <Label htmlFor="no-script-toggle" className="font-medium">Base Film Only (No Script)</Label>
+                <p className="text-xs text-gray-500">
+                  Skip audio generation - upload base films directly without voiceover
+                </p>
+              </div>
+              <Switch
+                id="no-script-toggle"
+                checked={noScriptMode}
+                onCheckedChange={setNoScriptMode}
+              />
+            </div>
+
+            {/* Voice Selection - hidden in no-script mode */}
+            {!noScriptMode && availableVoices.length > 0 && (
               <div className="space-y-2">
                 <Label htmlFor="voice-selector-process">Voice Selection</Label>
                 <Select value={selectedVoice} onValueChange={setSelectedVoice}>
@@ -2047,8 +2071,8 @@ export default function Unified() {
               </div>
             )}
 
-            {/* Subtitle Toggle */}
-            {baseDatabaseEntries.length > 0 && (
+            {/* Subtitle Toggle - hidden in no-script mode */}
+            {!noScriptMode && baseDatabaseEntries.length > 0 && (
               <div className="flex items-center justify-center space-x-3 border-t pt-4">
                 <Label htmlFor="subtitle-toggle-process" className="text-sm font-medium">
                   Without subtitles
@@ -2100,8 +2124,8 @@ export default function Unified() {
               />
             </div>
 
-            {/* Process Button */}
-            {selectedScriptIds.size > 0 && (
+            {/* Process Button - Scripts mode */}
+            {!noScriptMode && selectedScriptIds.size > 0 && (
               <div className="pt-4 border-t">
                 <Button
                   onClick={handleProcessExistingScripts}
@@ -2118,6 +2142,30 @@ export default function Unified() {
                     <>
                       <Video className="mr-2 h-4 w-4" />
                       Create {selectedScriptIds.size * selectedBaseIds.size} Video{selectedScriptIds.size * selectedBaseIds.size !== 1 ? 's' : ''} ({selectedScriptIds.size} script{selectedScriptIds.size !== 1 ? 's' : ''} × {selectedBaseIds.size} base{selectedBaseIds.size !== 1 ? 's' : ''})
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+
+            {/* Process Button - No Script mode (base films only) */}
+            {noScriptMode && selectedBaseIds.size > 0 && (
+              <div className="pt-4 border-t">
+                <Button
+                  onClick={handleProcessExistingScripts}
+                  disabled={isProcessingScripts || selectedBaseIds.size === 0}
+                  className="w-full"
+                  size="lg"
+                >
+                  {isProcessingScripts ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Processing Base Films...
+                    </>
+                  ) : (
+                    <>
+                      <Video className="mr-2 h-4 w-4" />
+                      Upload {selectedBaseIds.size} Base Film{selectedBaseIds.size !== 1 ? 's' : ''} to Drive
                     </>
                   )}
                 </Button>
