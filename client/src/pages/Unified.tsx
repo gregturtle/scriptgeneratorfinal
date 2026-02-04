@@ -340,12 +340,17 @@ export default function Unified() {
         fileLink: base.fileLink
       }));
       
+      // Find the voice name for the selected voice
+      const selectedVoiceData = availableVoices.find(v => v.voice_id === selectedVoice);
+      const voiceNameForAsset = selectedVoiceData?.name || '';
+      
       const response = await fetch('/api/scripts/process-to-videos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           scripts: scriptsToProcess,
           voiceId: selectedVoice,
+          voiceName: voiceNameForAsset,
           language: selectedLanguage,
           baseVideos: baseVideos, // Multiple base videos
           baseVideo: baseVideos[0], // Keep for backwards compatibility

@@ -1708,7 +1708,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
     try {
       const { 
         scripts, 
-        voiceId, 
+        voiceId,
+        voiceName = '',
         language = 'en',
         baseVideo,
         baseVideos = [], // Multiple base videos support
@@ -1736,13 +1737,14 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       if (spreadsheetId && baseVideosList.length > 0) {
         try {
           // Create entries for all combinations: each script with each base film
-          const entries: Array<{ baseId: string; scriptId: string; subtitled: boolean }> = [];
+          const entries: Array<{ baseId: string; scriptId: string; subtitled: boolean; voiceName?: string }> = [];
           for (const base of baseVideosList) {
             for (const script of scripts) {
               entries.push({
                 baseId: base.baseId,
                 scriptId: script.scriptTitle,
-                subtitled: includeSubtitles
+                subtitled: includeSubtitles,
+                voiceName: voiceName || undefined
               });
             }
           }

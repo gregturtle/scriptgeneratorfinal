@@ -918,6 +918,7 @@ class GoogleSheetsService {
       baseId: string;
       scriptId: string;
       subtitled: boolean;
+      voiceName?: string;
     }>
   ): Promise<Array<{ fileName: string; baseId: string; scriptId: string }>> {
     try {
@@ -997,6 +998,14 @@ class GoogleSheetsService {
           range: `${this.ASSET_DATABASE_TAB_NAME}!L${rowNum}`,
           values: [[entry.subtitled ? 'Y' : 'N']]
         });
+        
+        // Add Voice Name to column N (if provided)
+        if (entry.voiceName) {
+          batchData.push({
+            range: `${this.ASSET_DATABASE_TAB_NAME}!N${rowNum}`,
+            values: [[entry.voiceName]]
+          });
+        }
       }
       
       // Execute batch update
