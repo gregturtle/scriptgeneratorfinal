@@ -1823,8 +1823,20 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           try {
             console.log(`Processing base film: ${base.baseId} - ${base.baseTitle}`);
             
+            // Extract file ID from the fileLink
+            const baseFileId = googleDriveService.extractFileIdFromLink(base.fileLink);
+            if (!baseFileId) {
+              console.error(`Could not extract file ID from: ${base.fileLink}`);
+              continue;
+            }
+            
             // Download the base film
-            const baseFilePath = await googleDriveService.downloadFile(base.fileLink);
+            const downloadResult = await googleDriveService.downloadVideoFile(baseFileId, `${base.baseId}.mp4`);
+            if (!downloadResult.success || !downloadResult.filePath) {
+              console.error(`Failed to download base film ${base.baseId}: ${downloadResult.error}`);
+              continue;
+            }
+            const baseFilePath = downloadResult.filePath;
             
             // Use File_Name from Asset_Database if available, otherwise fallback
             const assetFileName = noScriptAssetMap.get(base.baseId);
