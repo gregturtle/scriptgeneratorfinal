@@ -1771,7 +1771,36 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
 
       // === NO-SCRIPT MODE: Upload base films directly without audio ===
       if (noScriptMode) {
-        console.log(`No-script mode: Uploading ${baseVideosList.length} base films directly to Google Drive`);
+        console.log(`No-script mode: Processing ${baseVideosList.length} base films directly`);
+        
+        // Write to Asset_Database with s99999 as Script_Id for each base film
+        const NO_SCRIPT_ID = 's99999';
+        let noScriptAssetEntries: Array<{ fileName: string; baseId: string; scriptId: string }> = [];
+        
+        if (spreadsheetId && baseVideosList.length > 0) {
+          try {
+            const entries: Array<{ baseId: string; scriptId: string; subtitled: boolean; voiceName?: string }> = [];
+            for (const base of baseVideosList) {
+              entries.push({
+                baseId: base.baseId,
+                scriptId: NO_SCRIPT_ID,
+                subtitled: false,
+                voiceName: undefined // No voice in no-script mode
+              });
+            }
+            
+            noScriptAssetEntries = await googleSheetsService.writeAssetEntries(spreadsheetId, entries);
+            console.log(`Got ${noScriptAssetEntries.length} File_Names from Asset_Database for no-script mode`);
+          } catch (assetError) {
+            console.error('Error writing to Asset_Database in no-script mode:', assetError);
+          }
+        }
+        
+        // Build map for looking up file names
+        const noScriptAssetMap = new Map<string, string>();
+        for (const entry of noScriptAssetEntries) {
+          noScriptAssetMap.set(entry.baseId, entry.fileName);
+        }
         
         // Create batch folder
         let batchFolderId: string | null = null;
@@ -1788,6 +1817,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         
         // Download each base film from Drive and re-upload to batch folder
         const uploadedVideos: any[] = [];
+        const videoLinkUpdates: Array<{ fileName: string; videoLink: string }> = [];
         
         for (const base of baseVideosList) {
           try {
@@ -1796,14 +1826,20 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
             // Download the base film
             const baseFilePath = await googleDriveService.downloadFile(base.fileLink);
             
-            // Upload to batch folder with base ID as filename
-            const fileName = `${base.baseId}_${base.baseTitle || 'video'}.mp4`;
+            // Use File_Name from Asset_Database if available, otherwise fallback
+            const assetFileName = noScriptAssetMap.get(base.baseId);
+            const fileName = assetFileName ? `${assetFileName}.mp4` : `${base.baseId}_${base.baseTitle || 'video'}.mp4`;
             let uploadedFileLink = null;
             
             if (batchFolderId) {
               const uploadResult = await googleDriveService.uploadFile(baseFilePath, batchFolderId, fileName);
               uploadedFileLink = uploadResult.webViewLink;
               console.log(`Uploaded ${fileName} to Drive: ${uploadedFileLink}`);
+              
+              // Track for Asset_Database update
+              if (assetFileName && uploadedFileLink) {
+                videoLinkUpdates.push({ fileName: assetFileName, videoLink: uploadedFileLink });
+              }
             }
             
             uploadedVideos.push({
@@ -1819,6 +1855,16 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
             await fileService.cleanupFile(baseFilePath);
           } catch (baseError: any) {
             console.error(`Error processing base film ${base.baseId}:`, baseError.message);
+          }
+        }
+        
+        // Update Asset_Database column M with video links
+        if (spreadsheetId && videoLinkUpdates.length > 0) {
+          try {
+            await googleSheetsService.updateAssetVideoLinks(spreadsheetId, videoLinkUpdates);
+            console.log(`Updated ${videoLinkUpdates.length} video links in Asset_Database column M`);
+          } catch (linkUpdateError) {
+            console.error('Error updating video links in Asset_Database:', linkUpdateError);
           }
         }
         
