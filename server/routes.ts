@@ -3383,6 +3383,81 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
     }
   });
 
+  app.post('/api/meta/activate-campaign', async (req, res) => {
+    try {
+      const accessToken = await getAccessToken();
+      const { campaignId } = req.body;
+
+      if (!campaignId) {
+        return res.status(400).json({ error: 'campaignId is required' });
+      }
+
+      const apiVersion = 'v23.0';
+      const baseUrl = `https://graph.facebook.com/${apiVersion}`;
+
+      const updateStatus = async (id: string, status: string) => {
+        const resp = await fetch(`${baseUrl}/${id}?access_token=${accessToken}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        });
+        if (!resp.ok) {
+          const err = await resp.text();
+          throw new Error(`Failed to update ${id}: ${err}`);
+        }
+        return resp.json();
+      };
+
+      await updateStatus(campaignId, 'ACTIVE');
+      console.log(`[Meta] Campaign ${campaignId} set to ACTIVE`);
+
+      const adSetsResp = await fetch(
+        `${baseUrl}/${campaignId}/adsets?fields=id,status&access_token=${accessToken}`
+      );
+      const adSetsData = await adSetsResp.json();
+      const adSetResults: any[] = [];
+
+      if (adSetsData.data) {
+        for (const adSet of adSetsData.data) {
+          try {
+            await updateStatus(adSet.id, 'ACTIVE');
+            console.log(`[Meta] Ad Set ${adSet.id} set to ACTIVE`);
+
+            const adsResp = await fetch(
+              `${baseUrl}/${adSet.id}/ads?fields=id,status&access_token=${accessToken}`
+            );
+            const adsData = await adsResp.json();
+            const adResults: any[] = [];
+            if (adsData.data) {
+              for (const ad of adsData.data) {
+                try {
+                  await updateStatus(ad.id, 'ACTIVE');
+                  console.log(`[Meta] Ad ${ad.id} set to ACTIVE`);
+                  adResults.push({ id: ad.id, status: 'ACTIVE' });
+                } catch (e: any) {
+                  adResults.push({ id: ad.id, error: e.message });
+                }
+              }
+            }
+            adSetResults.push({ id: adSet.id, status: 'ACTIVE', ads: adResults });
+          } catch (e: any) {
+            adSetResults.push({ id: adSet.id, error: e.message });
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        campaignId,
+        status: 'ACTIVE',
+        adSets: adSetResults,
+      });
+    } catch (error: any) {
+      console.error('[Meta] Error activating campaign:', error);
+      res.status(500).json({ error: error.message || 'Failed to activate campaign' });
+    }
+  });
+
   // Serve static files for uploads (backgrounds folder)
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
