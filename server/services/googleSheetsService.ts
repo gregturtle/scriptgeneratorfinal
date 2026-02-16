@@ -1138,6 +1138,63 @@ class GoogleSheetsService {
     }
   }
 
+  async getAssetDatabaseEntries(
+    spreadsheetId: string
+  ): Promise<Array<{
+    fileName: string;
+    assetId: string;
+    baseId: string;
+    scriptId: string;
+    subtitled: string;
+    gdriveLink: string;
+    timestamp: string;
+  }>> {
+    try {
+      const cleanSpreadsheetId = this.extractSpreadsheetId(spreadsheetId);
+      
+      const response = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: cleanSpreadsheetId,
+        range: `${this.ASSET_DATABASE_TAB_NAME}!A:N`,
+      });
+      
+      const rows = response.data.values || [];
+      if (rows.length <= 1) return [];
+      
+      const entries: Array<{
+        fileName: string;
+        assetId: string;
+        baseId: string;
+        scriptId: string;
+        subtitled: string;
+        gdriveLink: string;
+        timestamp: string;
+      }> = [];
+      
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const fileName = row[0]?.toString().trim() || '';
+        const gdriveLink = row[12]?.toString().trim() || '';
+        
+        if (!fileName) continue;
+        
+        entries.push({
+          fileName,
+          assetId: row[1]?.toString().trim() || '',
+          baseId: row[4]?.toString().trim() || '',
+          scriptId: row[7]?.toString().trim() || '',
+          subtitled: row[11]?.toString().trim() || '',
+          gdriveLink,
+          timestamp: row[3]?.toString().trim() || '',
+        });
+      }
+      
+      return entries;
+    } catch (error) {
+      console.error('Error reading Asset_Database:', error);
+      throw error;
+    }
+  }
+
   async appendToCampaignPausingReport(
     spreadsheetId: string,
     adEntries: Array<{ campaignName: string; adId: string; adName: string }>

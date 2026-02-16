@@ -1621,6 +1621,25 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
     }
   });
 
+  app.get('/api/google-sheets/asset-database', async (req, res) => {
+    try {
+      const { spreadsheetId } = req.query;
+
+      if (!spreadsheetId || typeof spreadsheetId !== 'string') {
+        return res.status(400).json({ error: 'Spreadsheet ID is required' });
+      }
+
+      const assets = await googleSheetsService.getAssetDatabaseEntries(spreadsheetId);
+      res.json({ assets });
+    } catch (error: any) {
+      console.error('Error reading Asset_Database from Google Sheets:', error);
+      res.status(500).json({
+        error: 'Failed to read Asset_Database from Google Sheets',
+        details: error.message
+      });
+    }
+  });
+
   // Append base film entries to Base_Database tab
   app.post('/api/google-sheets/base-database/append', async (req, res) => {
     try {

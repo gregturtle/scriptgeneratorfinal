@@ -118,6 +118,24 @@ export default function Unified() {
   const [metaUploadProgress, setMetaUploadProgress] = useState<{current: number, total: number, currentVideo?: string}>({current: 0, total: 0});
   const [metaMarket, setMetaMarket] = useState<'UK' | 'IN' | 'DE' | 'US'>('UK');
 
+  // States for Upload to Meta tab (existing assets from Asset_Database)
+  const [assetDatabaseEntries, setAssetDatabaseEntries] = useState<Array<{
+    fileName: string;
+    assetId: string;
+    baseId: string;
+    scriptId: string;
+    subtitled: string;
+    gdriveLink: string;
+    timestamp: string;
+  }>>([]);
+  const [selectedAssetFileNames, setSelectedAssetFileNames] = useState<Set<string>>(new Set());
+  const [isLoadingAssetDatabase, setIsLoadingAssetDatabase] = useState(false);
+  const [existingMetaMarket, setExistingMetaMarket] = useState<'UK' | 'IN' | 'DE' | 'US'>('UK');
+  const [isUploadingExistingToMeta, setIsUploadingExistingToMeta] = useState(false);
+  const [existingUploadedAssets, setExistingUploadedAssets] = useState<Array<{fileName: string; metaVideoId: string}>>([]);
+  const [isCreatingExistingCampaign, setIsCreatingExistingCampaign] = useState(false);
+  const [existingCampaignResult, setExistingCampaignResult] = useState<any>(null);
+
   // States for base asset form - shared fields that apply to all entries
   const [sharedAssetType, setSharedAssetType] = useState('');
   const [sharedAspectRatio, setSharedAspectRatio] = useState('');
@@ -544,6 +562,130 @@ export default function Unified() {
     }
   };
 
+  // Load Asset_Database entries for Upload to Meta tab
+  const loadAssetDatabase = async () => {
+    if (!spreadsheetId) {
+      toast({ title: "Missing spreadsheet", description: "Enter a Google Sheets URL first", variant: "destructive" });
+      return;
+    }
+    setIsLoadingAssetDatabase(true);
+    try {
+      const response = await fetch(`/api/google-sheets/asset-database?spreadsheetId=${encodeURIComponent(spreadsheetId.trim())}`);
+      if (response.ok) {
+        const data = await response.json();
+        setAssetDatabaseEntries(data.assets || []);
+        setSelectedAssetFileNames(new Set());
+      } else {
+        toast({ title: "Error", description: "Failed to load Asset_Database", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to load Asset_Database", variant: "destructive" });
+    } finally {
+      setIsLoadingAssetDatabase(false);
+    }
+  };
+
+  const handleUploadExistingToMeta = async () => {
+    const selected = assetDatabaseEntries.filter(a => selectedAssetFileNames.has(a.fileName));
+    const assetsWithLinks = selected.filter(a => a.gdriveLink);
+    
+    if (assetsWithLinks.length === 0) {
+      toast({ title: "No uploadable assets", description: "Selected assets must have a Google Drive link", variant: "destructive" });
+      return;
+    }
+
+    setIsUploadingExistingToMeta(true);
+    try {
+      const assets = assetsWithLinks.map(a => {
+        let fileId = a.gdriveLink;
+        const dMatch = a.gdriveLink.match(/\/d\/([a-zA-Z0-9_-]+)/);
+        const idMatch = a.gdriveLink.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+        if (dMatch) fileId = dMatch[1];
+        else if (idMatch) fileId = idMatch[1];
+        else if (/^[a-zA-Z0-9_-]{10,}$/.test(a.gdriveLink.trim())) fileId = a.gdriveLink.trim();
+        return {
+          fileName: a.fileName,
+          videoFileId: fileId,
+          driveLink: a.gdriveLink
+        };
+      });
+
+      const response = await fetch('/api/meta/upload-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assets })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const successfulUploads = result.uploadResults.filter((r: any) => r.success);
+        setExistingUploadedAssets(successfulUploads.map((r: any) => ({
+          fileName: r.fileName,
+          metaVideoId: r.metaVideoId
+        })));
+
+        if (result.successCount > 0) {
+          toast({
+            title: "Upload successful",
+            description: `${result.successCount}/${result.totalCount} videos uploaded to Meta. Click 'Create Campaign' to proceed.`,
+          });
+        } else {
+          toast({ title: "Upload failed", description: "No videos were uploaded to Meta", variant: "destructive" });
+        }
+      } else {
+        const error = await response.json();
+        toast({ title: "Upload failed", description: error.error || "Failed to upload to Meta", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to upload assets to Meta", variant: "destructive" });
+    } finally {
+      setIsUploadingExistingToMeta(false);
+    }
+  };
+
+  const handleCreateExistingCampaign = async () => {
+    if (existingUploadedAssets.length === 0) {
+      toast({ title: "No uploaded assets", description: "Upload videos to Meta first", variant: "destructive" });
+      return;
+    }
+
+    setIsCreatingExistingCampaign(true);
+    try {
+      const response = await fetch('/api/meta/create-campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uploadedAssets: existingUploadedAssets,
+          metaMarket: existingMetaMarket,
+          spreadsheetId: spreadsheetId.trim()
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setExistingCampaignResult(result);
+
+        if (result.success) {
+          toast({
+            title: "Campaign created",
+            description: `Created campaign with ${result.successCount} ads. Campaign ID: ${result.campaignId}`,
+          });
+          setSelectedAssetFileNames(new Set());
+          setExistingUploadedAssets([]);
+        } else {
+          toast({ title: "Campaign creation failed", description: result.error || "Failed to create campaign", variant: "destructive" });
+        }
+      } else {
+        const error = await response.json();
+        toast({ title: "Campaign creation failed", description: error.error || "Failed to create campaign", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to create Meta campaign", variant: "destructive" });
+    } finally {
+      setIsCreatingExistingCampaign(false);
+    }
+  };
+
   // Load available tabs for iterations
   const loadIterationsTabs = async () => {
     if (!iterationsSpreadsheetId) return;
@@ -961,8 +1103,12 @@ export default function Unified() {
             <Video className="h-4 w-4" />
             Asset Creation
           </TabsTrigger>
-          <TabsTrigger value="base-asset" className="flex items-center gap-2">
+          <TabsTrigger value="upload-meta" className="flex items-center gap-2">
             <Upload className="h-4 w-4" />
+            Upload to Meta
+          </TabsTrigger>
+          <TabsTrigger value="base-asset" className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
             Base Asset Form
           </TabsTrigger>
         </TabsList>
@@ -1666,6 +1812,187 @@ export default function Unified() {
       </TabsContent>
 
       {/* Base Asset Form Tab Content */}
+      <TabsContent value="upload-meta" className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5" />
+              Upload Existing Assets to Meta
+            </CardTitle>
+            <CardDescription>
+              Select assets from Asset_Database and upload them directly to your Meta Ad Account
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-2">
+              <Label>Google Sheets URL or ID</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={spreadsheetId}
+                  onChange={(e) => setSpreadsheetId(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/your-sheet-id/edit"
+                  className="flex-1"
+                />
+                <Button onClick={loadAssetDatabase} disabled={isLoadingAssetDatabase || !spreadsheetId}>
+                  {isLoadingAssetDatabase ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Meta Market</Label>
+              <Select value={existingMetaMarket} onValueChange={(v) => setExistingMetaMarket(v as any)}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="UK">UK</SelectItem>
+                  <SelectItem value="IN">IN</SelectItem>
+                  <SelectItem value="DE">DE</SelectItem>
+                  <SelectItem value="US">US</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {assetDatabaseEntries.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>Asset_Database ({assetDatabaseEntries.length} assets)</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const withLinks = assetDatabaseEntries.filter(a => a.gdriveLink);
+                        setSelectedAssetFileNames(new Set(withLinks.map(a => a.fileName)));
+                      }}
+                    >
+                      Select All with Link
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedAssetFileNames(new Set())}
+                    >
+                      Deselect All
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="border rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium w-8"></th>
+                        <th className="px-3 py-2 text-left font-medium">File_Name</th>
+                        <th className="px-3 py-2 text-left font-medium">Asset_Id</th>
+                        <th className="px-3 py-2 text-left font-medium">Base_Id</th>
+                        <th className="px-3 py-2 text-left font-medium">Script_Id</th>
+                        <th className="px-3 py-2 text-left font-medium">Drive Link</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assetDatabaseEntries.map((asset, index) => (
+                        <tr key={index} className={`border-t ${!asset.gdriveLink ? 'opacity-50' : ''}`}>
+                          <td className="px-3 py-2">
+                            <Checkbox
+                              checked={selectedAssetFileNames.has(asset.fileName)}
+                              disabled={!asset.gdriveLink}
+                              onCheckedChange={(checked) => {
+                                const newSet = new Set(selectedAssetFileNames);
+                                if (checked) {
+                                  newSet.add(asset.fileName);
+                                } else {
+                                  newSet.delete(asset.fileName);
+                                }
+                                setSelectedAssetFileNames(newSet);
+                              }}
+                            />
+                          </td>
+                          <td className="px-3 py-2 font-mono text-xs">{asset.fileName}</td>
+                          <td className="px-3 py-2">{asset.assetId}</td>
+                          <td className="px-3 py-2">{asset.baseId}</td>
+                          <td className="px-3 py-2">{asset.scriptId}</td>
+                          <td className="px-3 py-2">
+                            {asset.gdriveLink ? (
+                              <a href={asset.gdriveLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-xs">
+                                View
+                              </a>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">No link</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {selectedAssetFileNames.size > 0 && existingUploadedAssets.length === 0 && (
+                  <Button
+                    onClick={handleUploadExistingToMeta}
+                    disabled={isUploadingExistingToMeta || selectedAssetFileNames.size === 0}
+                    className="w-full"
+                  >
+                    {isUploadingExistingToMeta ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Uploading to Meta...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="mr-2 h-4 w-4" />
+                        Upload {selectedAssetFileNames.size} Asset{selectedAssetFileNames.size !== 1 ? 's' : ''} to Meta
+                      </>
+                    )}
+                  </Button>
+                )}
+
+                {existingUploadedAssets.length > 0 && (
+                  <div className="pt-4 border-t space-y-3">
+                    <div className="text-sm font-medium text-gray-700">
+                      {existingUploadedAssets.length} video(s) uploaded to Meta - ready for campaign creation
+                    </div>
+                    <Button
+                      onClick={handleCreateExistingCampaign}
+                      disabled={isCreatingExistingCampaign || existingUploadedAssets.length === 0}
+                      className="w-full"
+                    >
+                      {isCreatingExistingCampaign ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Creating Campaign...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="mr-2 h-4 w-4" />
+                          Create Campaign with {existingUploadedAssets.length} Ad{existingUploadedAssets.length !== 1 ? 's' : ''}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+
+                {existingCampaignResult && existingCampaignResult.success && (
+                  <div className="pt-4 border-t">
+                    <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                      <div className="text-sm font-medium text-green-800">
+                        Campaign Created Successfully
+                      </div>
+                      <div className="text-xs text-green-600 mt-1">
+                        Campaign ID: {existingCampaignResult.campaignId}<br/>
+                        Market: {existingCampaignResult.market}<br/>
+                        Ads Created: {existingCampaignResult.successCount}/{existingCampaignResult.totalCount}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </TabsContent>
+
       <TabsContent value="base-asset" className="space-y-6">
         <Card>
           <CardHeader>
