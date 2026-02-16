@@ -446,22 +446,26 @@ class GoogleDriveService {
    * Create a timestamped subfolder within a parent folder
    * @param parentFolderId - The parent folder ID
    * @param baseTitle - Optional base title to include in folder name (e.g., "AerialStreetView")
+   * @param metaMarket - Optional meta market to include in folder name (e.g., "UK", "DE")
    */
-  async createTimestampedSubfolder(parentFolderId: string, baseTitle?: string): Promise<string> {
+  async createTimestampedSubfolder(parentFolderId: string, baseTitle?: string, metaMarket?: string): Promise<string> {
     if (!this.isConfigured()) {
       throw new Error('Google Drive service not configured');
     }
 
     try {
-      // Generate date in yy-mm-dd format
       const now = new Date();
       const yy = String(now.getFullYear()).slice(-2);
       const mm = String(now.getMonth() + 1).padStart(2, '0');
       const dd = String(now.getDate()).padStart(2, '0');
-      const dateStr = `${yy}-${mm}-${dd}`;
+      const hh = String(now.getHours()).padStart(2, '0');
+      const min = String(now.getMinutes()).padStart(2, '0');
+      const dateTimeStr = `${yy}-${mm}-${dd}_${hh}-${min}`;
       
-      // Format: yy-mm-dd_BaseTitle or just yy-mm-dd if no title
-      const folderName = baseTitle ? `${dateStr}_${baseTitle}` : dateStr;
+      const parts = [dateTimeStr];
+      if (metaMarket) parts.push(metaMarket);
+      if (baseTitle) parts.push(baseTitle);
+      const folderName = parts.join('_');
 
       console.log(`Creating timestamped subfolder: ${folderName} in parent folder ${parentFolderId}`);
 

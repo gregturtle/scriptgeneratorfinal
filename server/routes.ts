@@ -1351,7 +1351,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       // Test creating a timestamped subfolder
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').substring(0, 19);
       const testFolderId = await googleDriveService.createTimestampedSubfolder(
-        '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh',
+        '19EXiJmL9_qBcCklE4nOMn7Nem_gg600S',
         `test_${timestamp}`
       );
 
@@ -1808,8 +1808,9 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         
         if (googleDriveService.isConfigured()) {
           batchFolderId = await googleDriveService.createTimestampedSubfolder(
-            '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh',
-            'NoScript'
+            '19EXiJmL9_qBcCklE4nOMn7Nem_gg600S',
+            'NoScript',
+            metaMarket
           );
           batchFolderLink = `https://drive.google.com/drive/folders/${batchFolderId}`;
           console.log(`Created batch folder for no-script mode: ${batchFolderLink}`);
@@ -1970,8 +1971,9 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
           console.log(`Creating shared batch folder for ${totalCombinations} videos across ${baseVideosList.length} base films`);
           if (googleDriveService.isConfigured()) {
             sharedBatchFolderId = await googleDriveService.createTimestampedSubfolder(
-              '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh',
-              undefined // No base title - this folder contains all base films
+              '19EXiJmL9_qBcCklE4nOMn7Nem_gg600S',
+              undefined,
+              metaMarket
             );
             sharedBatchFolderLink = `https://drive.google.com/drive/folders/${sharedBatchFolderId}`;
             console.log(`Created shared batch folder: ${sharedBatchFolderLink}`);
@@ -2180,9 +2182,9 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         const batchName = `processed_batch_${Date.now()}`;
         
         // Upload videos to Google Drive first
-        const parentFolderId = '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh'; // AI Generated Videos folder
+        const parentFolderId = '19EXiJmL9_qBcCklE4nOMn7Nem_gg600S';
         const baseTitle = baseVideo?.baseTitle;
-        const driveFolderId = await googleDriveService.createTimestampedSubfolder(parentFolderId, baseTitle);
+        const driveFolderId = await googleDriveService.createTimestampedSubfolder(parentFolderId, baseTitle, metaMarket);
         const driveFolderLink = `https://drive.google.com/drive/folders/${driveFolderId}`;
         const driveFolder = { id: driveFolderId, webViewLink: driveFolderLink };
         

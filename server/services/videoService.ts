@@ -270,8 +270,8 @@ class VideoService {
             driveResult = await googleDriveService.uploadVideoToTimestampedFolder(
               result.outputPath,
               outputFileName,
-              '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh', // User's Shared Drive folder ID
-              timestamp // Use same timestamp as filename for folder organization
+              '19EXiJmL9_qBcCklE4nOMn7Nem_gg600S',
+              timestamp
             );
             console.log(`Video uploaded to timestamped subfolder: ${driveResult.webViewLink}`);
             console.log(`Timestamped folder link: ${driveResult.folderLink}`);
@@ -501,7 +501,7 @@ class VideoService {
         if (googleDriveService.isConfigured()) {
           console.log('Google Drive service is configured, creating timestamped subfolder...');
           batchFolderId = await googleDriveService.createTimestampedSubfolder(
-            '1AIe9UvmYnBJiJyD1rMzLZRNqKDw-BWJh',
+            '19EXiJmL9_qBcCklE4nOMn7Nem_gg600S',
             baseTitle
           );
           batchFolderLink = `https://drive.google.com/drive/folders/${batchFolderId}`;
