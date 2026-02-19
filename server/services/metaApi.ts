@@ -89,6 +89,87 @@ function replaceVideoIds(value: any, videoId: string): number {
   return 0;
 }
 
+type MetaAdSetRecord = {
+  id: string;
+  name?: string;
+  status?: string;
+  targeting?: any;
+  promoted_object?: any;
+};
+
+function getExcludedCustomAudienceIds(targeting: any): string[] {
+  const audiences = targeting?.excluded_custom_audiences;
+  if (!Array.isArray(audiences)) {
+    return [];
+  }
+
+  const ids = audiences
+    .map((audience: any) => {
+      if (typeof audience === "string") {
+        return audience;
+      }
+      if (audience && typeof audience === "object" && typeof audience.id === "string") {
+        return audience.id;
+      }
+      return "";
+    })
+    .filter((id: string) => id.length > 0);
+
+  return Array.from(new Set(ids));
+}
+
+function normalizeAudienceReferences(audiences: any): Array<{ id: string }> | undefined {
+  if (!Array.isArray(audiences)) {
+    return undefined;
+  }
+
+  const normalized = audiences
+    .map((audience: any) => {
+      if (typeof audience === "string") {
+        return { id: audience };
+      }
+      if (audience && typeof audience === "object" && typeof audience.id === "string") {
+        return { id: audience.id };
+      }
+      return null;
+    })
+    .filter((audience: { id: string } | null): audience is { id: string } => Boolean(audience));
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function sanitizeTargetingForCreate(targeting: any): any {
+  if (!targeting || typeof targeting !== "object") {
+    return targeting;
+  }
+
+  const clone = JSON.parse(JSON.stringify(targeting));
+  const customAudiences = normalizeAudienceReferences(clone.custom_audiences);
+  const excludedCustomAudiences = normalizeAudienceReferences(clone.excluded_custom_audiences);
+
+  if (customAudiences) {
+    clone.custom_audiences = customAudiences;
+  } else {
+    delete clone.custom_audiences;
+  }
+
+  if (excludedCustomAudiences) {
+    clone.excluded_custom_audiences = excludedCustomAudiences;
+  } else {
+    delete clone.excluded_custom_audiences;
+  }
+
+  return clone;
+}
+
+function assertExclusionAudiencesPresent(targeting: any, context: string): string[] {
+  const excludedAudienceIds = getExcludedCustomAudienceIds(targeting);
+  if (excludedAudienceIds.length === 0) {
+    throw new Error(`${context} has no excluded_custom_audiences. Aborting to prevent existing-user delivery.`);
+  }
+  return excludedAudienceIds;
+}
+
 class MetaApiService {
   /**
    * Generate the login URL for Meta OAuth
@@ -169,6 +250,80 @@ class MetaApiService {
       adAccountId = adAccounts[0];
     }
     return this.normalizeAdAccountId(adAccountId);
+  }
+
+  private async getCampaignAdSets(accessToken: string, campaignId: string): Promise<MetaAdSetRecord[]> {
+    const response = await fetch(
+      `${FB_GRAPH_API}/${campaignId}/adsets?fields=id,name,status,targeting,promoted_object&limit=100&access_token=${accessToken}`,
+      { method: "GET" }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to get ad sets: ${errorText}`);
+    }
+
+    const adSetsData = await response.json() as any;
+    if (!Array.isArray(adSetsData.data)) {
+      return [];
+    }
+
+    return adSetsData.data as MetaAdSetRecord[];
+  }
+
+  private async getAdSetById(accessToken: string, adSetId: string): Promise<MetaAdSetRecord> {
+    const response = await fetch(
+      `${FB_GRAPH_API}/${adSetId}?fields=id,name,status,targeting,promoted_object&access_token=${accessToken}`,
+      { method: "GET" }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to fetch ad set ${adSetId}: ${errorText}`);
+    }
+
+    return await response.json() as MetaAdSetRecord;
+  }
+
+  private pickPreferredAdSet(adSets: MetaAdSetRecord[]): MetaAdSetRecord {
+    const withExclusions = adSets.filter((adSet) => getExcludedCustomAudienceIds(adSet.targeting).length > 0);
+    if (withExclusions.length > 0) {
+      const activeWithExclusions = withExclusions.find((adSet) => adSet.status === "ACTIVE");
+      return activeWithExclusions || withExclusions[0];
+    }
+
+    const active = adSets.find((adSet) => adSet.status === "ACTIVE");
+    if (active) {
+      return active;
+    }
+
+    return adSets[0];
+  }
+
+  private async resolveCampaignAdSet(
+    accessToken: string,
+    campaignId: string,
+    adAccountId: string
+  ): Promise<MetaAdSetRecord> {
+    const adSets = await this.getCampaignAdSets(accessToken, campaignId);
+    console.log(`[Meta AdSet Selection] Found ${adSets.length} ad sets for campaign ${campaignId}`);
+
+    if (adSets.length === 0) {
+      throw new Error(
+        `Campaign ${campaignId} has no ad sets. Refusing auto-create because exclusions are mandatory for delivery safety.`
+      );
+    }
+
+    const selectedAdSet = this.pickPreferredAdSet(adSets);
+    const exclusionIds = assertExclusionAudiencesPresent(
+      selectedAdSet.targeting,
+      `Ad set ${selectedAdSet.id} (${selectedAdSet.name || "Unnamed"})`
+    );
+    console.log(
+      `[Meta AdSet Selection] Using ad set ${selectedAdSet.id} (${selectedAdSet.name || "Unnamed"}) with excluded audiences: ${exclusionIds.join(", ")}`
+    );
+
+    return selectedAdSet;
   }
 
   async getCampaignTemplate(accessToken: string, campaignId: string): Promise<any> {
@@ -295,6 +450,12 @@ class MetaApiService {
     options: { campaignId: string; name: string; startTime: Date; endTime: Date; status?: string }
   ): Promise<string> {
     const adAccountId = await this.resolveAdAccountId(accessToken);
+    const targeting = sanitizeTargetingForCreate(templateAdSet.targeting);
+    const expectedExcludedAudienceIds = assertExclusionAudiencesPresent(
+      targeting,
+      `Template ad set "${templateAdSet?.id || templateAdSet?.name || "unknown"}"`
+    );
+
     const budgetPayload: Record<string, any> = {};
     if (templateAdSet.daily_budget) {
       budgetPayload.daily_budget = templateAdSet.daily_budget;
@@ -312,7 +473,7 @@ class MetaApiService {
       optimization_goal: templateAdSet.optimization_goal,
       bid_amount: templateAdSet.bid_amount,
       bid_strategy: templateAdSet.bid_strategy,
-      targeting: templateAdSet.targeting,
+      targeting,
       promoted_object: templateAdSet.promoted_object,
       attribution_spec: templateAdSet.attribution_spec,
       destination_type: templateAdSet.destination_type,
@@ -341,7 +502,24 @@ class MetaApiService {
     }
 
     const result = await response.json() as any;
-    return result.id as string;
+    const createdAdSetId = result.id as string;
+
+    // Guardrail: verify exclusions survive create.
+    const createdAdSet = await this.getAdSetById(accessToken, createdAdSetId);
+    const actualExcludedAudienceIds = assertExclusionAudiencesPresent(
+      createdAdSet.targeting,
+      `Created ad set ${createdAdSetId}`
+    );
+    const missingExcludedAudienceIds = expectedExcludedAudienceIds.filter(
+      (id) => !actualExcludedAudienceIds.includes(id)
+    );
+    if (missingExcludedAudienceIds.length > 0) {
+      throw new Error(
+        `Created ad set ${createdAdSetId} is missing exclusion audiences: ${missingExcludedAudienceIds.join(", ")}`
+      );
+    }
+
+    return createdAdSetId;
   }
 
   async createAdCreativeFromTemplate(
@@ -957,13 +1135,14 @@ class MetaApiService {
     accessToken: string,
     campaignId: string,
     videoId: string,
-    name: string
+    name: string,
+    adSetId?: string
   ): Promise<string> {
     console.log(`Creating ad creative for video ${videoId} in campaign ${campaignId}`);
     
     // Use the existing, working createAdCreative method for now
     console.log('Using direct API approach for creative creation...');
-    const creative = await this.createAdCreative(accessToken, campaignId, videoId, name);
+    const creative = await this.createAdCreative(accessToken, campaignId, videoId, name, adSetId);
     return creative.id;
   }
 
@@ -974,29 +1153,28 @@ class MetaApiService {
     accessToken: string,
     campaignId: string,
     creativeId: string,
-    name: string
+    name: string,
+    adSetId?: string
   ): Promise<string> {
     console.log(`Creating ad for creative ${creativeId} in campaign ${campaignId}`);
     
     try {
-      // Get ad set from campaign
-      const campaignResponse = await fetch(
-        `${FB_GRAPH_API}/${campaignId}/adsets?fields=id&access_token=${accessToken}`,
-        { method: "GET" }
+      const adAccountId = await this.resolveAdAccountId(accessToken);
+      const selectedAdSet = adSetId
+        ? await this.getAdSetById(accessToken, adSetId)
+        : await this.resolveCampaignAdSet(accessToken, campaignId, adAccountId);
+
+      const selectedAdSetId = selectedAdSet.id;
+      const exclusionIds = assertExclusionAudiencesPresent(
+        selectedAdSet.targeting,
+        `Ad set ${selectedAdSetId}`
       );
-      
-      const adSetsData = await campaignResponse.json() as any;
-      if (!adSetsData.data || adSetsData.data.length === 0) {
-        throw new Error(`No ad sets found for campaign ${campaignId}`);
-      }
-      
-      const adSetId = adSetsData.data[0].id;
-      console.log(`Using ad set ID: ${adSetId}`);
+      console.log(`[Meta Ad] Using ad set ${selectedAdSetId} with excluded audiences: ${exclusionIds.join(", ")}`);
       
       // Create ad using direct API
       const adData = {
         name: `AI Video Ad - ${name}`,
-        adset_id: adSetId,
+        adset_id: selectedAdSetId,
         creative: { creative_id: creativeId },
         status: 'ACTIVE'
       };
@@ -1004,7 +1182,7 @@ class MetaApiService {
       console.log('Creating ad with data:', JSON.stringify(adData, null, 2));
       
       const response = await fetch(
-        `${FB_GRAPH_API}/${META_AD_ACCOUNT_ID.startsWith('act_') ? META_AD_ACCOUNT_ID : `act_${META_AD_ACCOUNT_ID}`}/ads?access_token=${accessToken}`,
+        `${FB_GRAPH_API}/${adAccountId}/ads?access_token=${accessToken}`,
         {
           method: "POST",
           headers: {
@@ -1044,14 +1222,18 @@ class MetaApiService {
     console.log(`Starting complete Meta upload pipeline with SDK for: ${name}`);
     
     try {
+      const adAccountId = await this.resolveAdAccountId(accessToken);
+      const selectedAdSet = await this.resolveCampaignAdSet(accessToken, campaignId, adAccountId);
+      const selectedAdSetId = selectedAdSet.id;
+
       // Step 1: Upload video
       const videoId = await this.uploadVideoWithSDK(accessToken, videoPath, name);
       
       // Step 2: Create creative
-      const creativeId = await this.createAdCreativeWithSDK(accessToken, campaignId, videoId, name);
+      const creativeId = await this.createAdCreativeWithSDK(accessToken, campaignId, videoId, name, selectedAdSetId);
       
       // Step 3: Create ad
-      const adId = await this.createAdWithSDK(accessToken, campaignId, creativeId, name);
+      const adId = await this.createAdWithSDK(accessToken, campaignId, creativeId, name, selectedAdSetId);
       
       console.log(`Successfully created complete Meta ad: Video ${videoId} → Creative ${creativeId} → Ad ${adId}`);
       
@@ -1069,30 +1251,13 @@ class MetaApiService {
     accessToken: string,
     campaignId: string,
     videoAssetId: string,
-    name: string
+    name: string,
+    adSetIdOverride?: string
   ): Promise<any> {
     console.log(`Creating ad creative for video asset ${videoAssetId} in campaign ${campaignId}`);
     
-    // Use the ad account ID from environment variable if available
-    let adAccountId = META_AD_ACCOUNT_ID;
-    console.log(`Using ad account ID from env: ${adAccountId}`);
-    
-    // Fallback to fetching accounts if no environment variable is set
-    if (!adAccountId) {
-      console.log("No ad account ID in environment, fetching from API...");
-      const adAccounts = await this.getAdAccounts(accessToken);
-      if (adAccounts.length === 0) {
-        throw new Error("No ad accounts found for this user");
-      }
-      adAccountId = adAccounts[0];
-      console.log(`Fetched ad account ID: ${adAccountId}`);
-    }
-    
-    // Make sure adAccountId format is correct (should start with 'act_')
-    if (!adAccountId.startsWith('act_')) {
-      adAccountId = `act_${adAccountId}`;
-      console.log(`Formatted ad account ID: ${adAccountId}`);
-    }
+    const adAccountId = await this.resolveAdAccountId(accessToken);
+    console.log(`Using ad account ID: ${adAccountId}`);
     
     // Get campaign details to determine if it's an app install campaign
     console.log(`Fetching campaign details for ${campaignId}...`);
@@ -1113,42 +1278,12 @@ class MetaApiService {
     const isAppInstallCampaign = campaignObjective === 'APP_INSTALLS' || 
                                  campaignObjective === 'OUTCOME_APP_PROMOTION';
     
-    // Get the ad set ID from the campaign and try to find a page from existing ads
-    console.log(`Fetching ad sets for campaign ${campaignId}...`);
-    const campaignResponse = await fetch(
-      `${FB_GRAPH_API}/${campaignId}/adsets?fields=id,promoted_object&access_token=${accessToken}`,
-      {
-        method: "GET",
-      }
-    );
-
-    console.log(`Ad sets response status: ${campaignResponse.status} ${campaignResponse.statusText}`);
-    
-    if (!campaignResponse.ok) {
-      const errorText = await campaignResponse.text();
-      console.error(`Error fetching ad sets: ${errorText}`);
-      throw new Error(`Failed to get ad sets: ${errorText}`);
-    }
-
-    const adSetsData = await campaignResponse.json() as any;
-    console.log(`Found ${adSetsData.data.length} ad sets for campaign ${campaignId}`);
-    
-    // If no ad sets are found, create one
-    let adSetId;
-    if (adSetsData.data.length === 0) {
-      console.log(`No ad sets found for campaign ${campaignId}, creating one automatically`);
-      try {
-        adSetId = await this.createAdSet(accessToken, campaignId, adAccountId);
-        console.log(`Created new ad set with ID: ${adSetId}`);
-      } catch (error) {
-        console.error(`Failed to create ad set: ${error}`);
-        throw new Error(`No ad sets found and failed to create one: ${error}`);
-      }
-    } else {
-      // Use the first ad set
-      adSetId = adSetsData.data[0].id;
-      console.log(`Using existing ad set ID: ${adSetId}`);
-    }
+    const selectedAdSet = adSetIdOverride
+      ? await this.getAdSetById(accessToken, adSetIdOverride)
+      : await this.resolveCampaignAdSet(accessToken, campaignId, adAccountId);
+    const adSetId = selectedAdSet.id;
+    const exclusionIds = assertExclusionAudiencesPresent(selectedAdSet.targeting, `Ad set ${adSetId}`);
+    console.log(`[Meta Creative] Using ad set ${adSetId} with excluded audiences: ${exclusionIds.join(", ")}`);
     
     // Try to find page ID from existing ads in this campaign
     let pageId;
