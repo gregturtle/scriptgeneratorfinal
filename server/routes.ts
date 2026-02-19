@@ -3386,7 +3386,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
   app.post('/api/meta/activate-campaign', async (req, res) => {
     try {
       const accessToken = await getAccessToken();
-      const { campaignId } = req.body;
+      const { campaignId, status: targetStatus } = req.body;
+      const newStatus = targetStatus === 'PAUSED' ? 'PAUSED' : 'ACTIVE';
 
       if (!campaignId) {
         return res.status(400).json({ error: 'campaignId is required' });
@@ -3408,8 +3409,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
         return resp.json();
       };
 
-      await updateStatus(campaignId, 'ACTIVE');
-      console.log(`[Meta] Campaign ${campaignId} set to ACTIVE`);
+      await updateStatus(campaignId, newStatus);
+      console.log(`[Meta] Campaign ${campaignId} set to ${newStatus}`);
 
       const adSetsResp = await fetch(
         `${baseUrl}/${campaignId}/adsets?fields=id,status&access_token=${accessToken}`
@@ -3420,8 +3421,8 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       if (adSetsData.data) {
         for (const adSet of adSetsData.data) {
           try {
-            await updateStatus(adSet.id, 'ACTIVE');
-            console.log(`[Meta] Ad Set ${adSet.id} set to ACTIVE`);
+            await updateStatus(adSet.id, newStatus);
+            console.log(`[Meta] Ad Set ${adSet.id} set to ${newStatus}`);
 
             const adsResp = await fetch(
               `${baseUrl}/${adSet.id}/ads?fields=id,status&access_token=${accessToken}`
@@ -3431,15 +3432,15 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
             if (adsData.data) {
               for (const ad of adsData.data) {
                 try {
-                  await updateStatus(ad.id, 'ACTIVE');
-                  console.log(`[Meta] Ad ${ad.id} set to ACTIVE`);
-                  adResults.push({ id: ad.id, status: 'ACTIVE' });
+                  await updateStatus(ad.id, newStatus);
+                  console.log(`[Meta] Ad ${ad.id} set to ${newStatus}`);
+                  adResults.push({ id: ad.id, status: newStatus });
                 } catch (e: any) {
                   adResults.push({ id: ad.id, error: e.message });
                 }
               }
             }
-            adSetResults.push({ id: adSet.id, status: 'ACTIVE', ads: adResults });
+            adSetResults.push({ id: adSet.id, status: newStatus, ads: adResults });
           } catch (e: any) {
             adSetResults.push({ id: adSet.id, error: e.message });
           }
@@ -3449,7 +3450,7 @@ export async function registerRoutes(app: express.Express): Promise<Server> {
       res.json({
         success: true,
         campaignId,
-        status: 'ACTIVE',
+        status: newStatus,
         adSets: adSetResults,
       });
     } catch (error: any) {
