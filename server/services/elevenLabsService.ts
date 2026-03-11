@@ -85,7 +85,7 @@ class ElevenLabsService {
       similarityBoost = 0.75,
       style = 0.0,
       useSpeakerBoost = true,
-      modelId = 'eleven_monolingual_v1'
+      modelId = 'eleven_v3'
     } = options;
 
     const requestData: GenerateVoiceRequest = {
@@ -184,14 +184,7 @@ class ElevenLabsService {
         const textToSpeak = suggestion.nativeContent || suggestion.content;
         
         // Select appropriate model based on language
-        let modelId = 'eleven_multilingual_v2'; // Default for English - better accent preservation
-        if (language === 'kn') {
-          // Kannada requires Eleven v3 model
-          modelId = 'eleven_turbo_v2_5'; // Using the latest v3 model that supports Kannada
-        } else if (isMultilingual) {
-          // Other non-English languages use multilingual v2
-          modelId = 'eleven_multilingual_v2';
-        }
+        let modelId = 'eleven_v3'; // Latest and most expressive model, supports 70+ languages
         
         console.log(`Generating voice for suggestion ${i + 1} in ${language || 'en'} using model ${modelId}`);
         
